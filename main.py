@@ -126,7 +126,8 @@ def ask(model, messages, temp=0.3, timeout=15):
 def is_code_question(text):
     text_lower = text.lower().strip()
     general_terms = ['capital', 'country', 'city', 'state', 'president', 'king', 'queen',
-                     'war', 'history', 'population', 'language', 'currency']
+                     'war', 'history', 'population', 'language', 'currency', 'tutorial',
+                     'explain', 'what is', 'how to', 'overview', 'guide']
     for term in general_terms:
         if term in text_lower:
             return False
