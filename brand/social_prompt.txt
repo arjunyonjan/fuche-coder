@@ -1,0 +1,12 @@
+FUCHE AI social post prompt:
+
+Bright cyberpunk 9:16 vertical. Dark background with cyan grid. 
+Top red badge "CLAUDE KILLER". Main title "FUCHE AI" neon red 
+gradient. Subtitle "Code + Reasoning Stack · Under 1GB VRAM".
+
+Center: Split layout showing:
+Left: QwenCoder — code generation (0.3GB)
+Right: Hunyuan — deep reasoning (0.35GB)
+
+Bottom: VRAM meter 0.65GB/1GB. Badges: $0/MONTH · LOCAL · PRIVATE.
+Footer: YONJAN VENTURES with lightning bolt.
