@@ -14,6 +14,16 @@ logging.basicConfig(level=logging.INFO, format="%(message)s", stream=sys.stderr)
 log = logging.getLogger(__name__)
 
 HEADERS = {'User-Agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36'}
+URL_PATTERN = re.compile(r'^(https?://)?([a-zA-Z0-9-]+\.)+[a-zA-Z]{2,}(/[^\s]*)?$')
+
+
+def extract_text_from_html(html):
+    soup = BeautifulSoup(html, 'html.parser')
+    for tag in soup(['script', 'style', 'nav', 'footer', 'header', 'aside']):
+        tag.decompose()
+    text = soup.get_text(separator=' ', strip=True)
+    return re.sub(r'\s+', ' ', text).strip()
+
 
 def fetch_page_text(url, timeout=8):
     try:
@@ -25,12 +35,11 @@ def fetch_page_text(url, timeout=8):
         if resp.status_code != 200:
             log.warning(f"  ↳ HTTP {resp.status_code} — {url}")
             return ""
-        soup = BeautifulSoup(resp.text, 'html.parser')
-        for tag in soup(['script', 'style', 'nav', 'footer', 'header', 'aside']):
-            tag.decompose()
-        text = soup.get_text(separator=' ', strip=True)
-        text = re.sub(r'\s+', ' ', text).strip()
-        log.info(f"  ↳ {len(text)} chars — {url}")
+        text = extract_text_from_html(resp.text)
+        if len(text) < 100:
+            log.info(f"  ↳ {len(text)} chars (JS likely) — {url}")
+        else:
+            log.info(f"  ↳ {len(text)} chars — {url}")
         return text[:2000]
     except requests.Timeout:
         log.warning(f"  ↳ TIMEOUT — {url}")
@@ -40,7 +49,55 @@ def fetch_page_text(url, timeout=8):
         log.warning(f"  ↳ {e} — {url}")
     return ""
 
+
+def fetch_page_text_js(url, timeout=15):
+    try:
+        from playwright.sync_api import sync_playwright
+    except ImportError:
+        log.warning("  ↳ Playwright not installed — skipping JS render")
+        return ""
+
+    browsers = [
+        ("chromium", {"args": ["--disable-http2"]}),
+        ("firefox", {}),
+    ]
+    for browser_name, launch_kwargs in browsers:
+        try:
+            with sync_playwright() as p:
+                browser = getattr(p, browser_name).launch(headless=True, **launch_kwargs)
+                page = browser.new_page()
+                page.goto(url, wait_until="domcontentloaded", timeout=timeout * 1000)
+                import time
+                time.sleep(2)
+                html = page.content()
+                browser.close()
+            text = extract_text_from_html(html)
+            log.info(f"  ↳ {len(text)} chars (JS render, {browser_name}) — {url}")
+            return text[:2000]
+        except Exception as e:
+            log.info(f"  ↳ {browser_name} failed: {e}")
+            continue
+    return ""
+
+
 def search_and_extract(query, max_results=3):
+    # If query looks like a URL, try to fetch it directly first
+    if URL_PATTERN.match(query.strip()):
+        url = query.strip()
+        if not url.startswith("http"):
+            url = "https://" + url
+        log.info(f"Direct URL fetch: {url}")
+        content = fetch_page_text(url)
+        if len(content) >= 100:
+            return f"Content from {url}:\n\n{content}"
+        # If too little content (JS SPA), try headless render
+        log.info(f"  ↳ HTML too short — trying JS render")
+        content_js = fetch_page_text_js(url)
+        if content_js:
+            return f"Content from {url} (JS rendered):\n\n{content_js}"
+        return f"Content from {url}:\n\n{content or '(empty)'}"
+
+    # Fall back to DDG search
     try:
         with DDGS() as ddgs:
             results = list(ddgs.text(query, max_results=max_results))
