@@ -1,8 +1,9 @@
 #!/usr/bin/env python3
 import sys
+import re
 import requests
 from bs4 import BeautifulSoup
-import re
+from ddgs import DDGS
 
 HEADERS = {'User-Agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36'}
 
@@ -20,26 +21,27 @@ def fetch_page_text(url, timeout=8):
     except Exception:
         return ""
 
-def search_and_extract(query):
-    search_url = f"https://html.duckduckgo.com/html/?q={query.replace(' ', '+')}"
-
+def search_and_extract(query, max_results=3):
     try:
-        resp = requests.get(search_url, headers=HEADERS, timeout=10)
-        soup = BeautifulSoup(resp.text, 'html.parser')
-        results = soup.find_all('a', class_='result__a')[:3]
-
-        output = f"Search results for: {query}\n\n"
-        for r in results:
-            title = r.text.strip()
-            href = r.get('href', '')
-            output += f"Title: {title}\nURL: {href}\n"
-            content = fetch_page_text(href)
-            if content:
-                output += f"Content: {content[:1000]}...\n"
-            output += "\n"
-        return output
+        with DDGS() as ddgs:
+            results = list(ddgs.text(query, max_results=max_results))
     except Exception as e:
         return f"Search failed: {e}"
+
+    if not results:
+        return f"Search results for: {query}\n\nNo results found."
+
+    output = f"Search results for: {query}\n\n"
+    for r in results:
+        title = r.get("title", "").strip()
+        href = r.get("href", "")
+        snippet = r.get("body", "")
+        output += f"Title: {title}\nURL: {href}\nSnippet: {snippet}\n"
+        content = fetch_page_text(href)
+        if content:
+            output += f"Content: {content[:1000]}...\n"
+        output += "\n"
+    return output
 
 if __name__ == "__main__":
     q = " ".join(sys.argv[1:])

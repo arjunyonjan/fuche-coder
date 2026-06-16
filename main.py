@@ -53,8 +53,8 @@ if __name__ == "__main__":
         sys.exit(1)
 
     if is_code_question(q):
-        print("💻 Code request → DeepSeek Coder", file=sys.stderr)
-        ans = ask("deepseek-coder:1.3b", [{"role": "user", "content": q}], temp=0.2, timeout=15)
+        print("💻 Code request → Qwen3:0.6b", file=sys.stderr)
+        ans = ask("qwen3:0.6b", [{"role": "user", "content": q}], temp=0.2, timeout=15)
     else:
         print("🧠 General question → Hunyuan", file=sys.stderr)
         messages = [
