@@ -2,9 +2,13 @@
 import logging
 import re
 import sys
+import urllib3
 import requests
 from bs4 import BeautifulSoup
 from ddgs import DDGS
+from requests.exceptions import SSLError
+
+urllib3.disable_warnings(urllib3.exceptions.InsecureRequestWarning)
 
 logging.basicConfig(level=logging.INFO, format="%(message)s", stream=sys.stderr)
 log = logging.getLogger(__name__)
@@ -13,7 +17,11 @@ HEADERS = {'User-Agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/
 
 def fetch_page_text(url, timeout=8):
     try:
-        resp = requests.get(url, headers=HEADERS, timeout=timeout)
+        try:
+            resp = requests.get(url, headers=HEADERS, timeout=timeout, verify=True)
+        except SSLError:
+            log.info(f"  ↳ SSL error — retrying without verification")
+            resp = requests.get(url, headers=HEADERS, timeout=timeout, verify=False)
         if resp.status_code != 200:
             log.warning(f"  ↳ HTTP {resp.status_code} — {url}")
             return ""
