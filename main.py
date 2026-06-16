@@ -1,7 +1,10 @@
 #!/usr/bin/env python3
-import os
+import logging
 import sys
 import requests
+
+logging.basicConfig(level=logging.INFO, format="%(message)s", stream=sys.stderr)
+log = logging.getLogger(__name__)
 
 OLLAMA = "http://localhost:11434/api/chat"
 
@@ -9,6 +12,12 @@ CODE_MODEL = "qwen3:0.6b"
 GEN_MODEL = "alibayram/hunyuan:0.5b"
 
 SYSTEM_PROMPT = "You are a helpful assistant. Provide accurate, concise, factual answers. If you don't know, say so."
+
+LOW_SIGNAL = [
+    "i don't know", "i'm not sure", "i cannot", "i'm sorry",
+    "i don't have", "unable to", "as an ai", "i do not know",
+    "i am not sure", "i am sorry"
+]
 
 def ask(model, messages, temp=0.3, timeout=15):
     payload = {
@@ -47,6 +56,31 @@ def is_code_question(text):
         if term in text_lower:
             return True
     return False
+
+def quality_check(text):
+    if not text:
+        return 0.0
+    text_lower = text.lower()
+    for phrase in LOW_SIGNAL:
+        if phrase in text_lower:
+            return 0.3
+    return 1.0
+
+def ask_with_search(query, model, history, temp=0.2):
+    ans = ask(model, history, temp)
+    score = quality_check(ans)
+    if score >= 0.5:
+        return ans
+    log.info(f"  ↳ quality {score:.2f} — searching web")
+    from crawler import search_and_extract
+    web = search_and_extract(query)
+    enhanced = history + [
+        {"role": "system", "content": f"Use this web search result to answer:\n{web}"},
+        {"role": "user", "content": query}
+    ]
+    log.info("  ↳ re-asking with web context")
+    ans2 = ask(model, enhanced, temp)
+    return ans2
 
 def chat():
     code_history = [{"role": "system", "content": SYSTEM_PROMPT}]
@@ -89,17 +123,17 @@ def chat():
 
         history.append({"role": "user", "content": q})
         print(f"  [{badge} → {model}]")
-        ans = ask(model, history, temp=0.2)
+        ans = ask_with_search(q, model, history, temp=0.2)
         print(f"  {ans}\n")
         history.append({"role": "assistant", "content": ans})
 
 def single_question(q):
     if is_code_question(q):
         print("💻 Code → Qwen3:0.6b", file=sys.stderr)
-        ans = ask(CODE_MODEL, [{"role": "user", "content": q}], temp=0.2)
+        ans = ask_with_search(q, CODE_MODEL, [{"role": "user", "content": q}], temp=0.2)
     else:
         print("🧠 General → Hunyuan", file=sys.stderr)
-        ans = ask(GEN_MODEL, [
+        ans = ask_with_search(q, GEN_MODEL, [
             {"role": "system", "content": SYSTEM_PROMPT},
             {"role": "user", "content": q}
         ], temp=0.2)
