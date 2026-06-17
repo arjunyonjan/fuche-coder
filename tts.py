@@ -27,6 +27,8 @@ parser.add_argument("--no-fast", action="store_true",
                     help="Disable greedy decoding (slower, higher quality)")
 parser.add_argument("--chunk-size", type=int, default=2,
                     help="Stream chunk size (lower = lower latency)")
+parser.add_argument("--dtype", default=None, choices=["bf16"],
+                    help="Half precision via BF16 (~2x speed, RTX 5060+)")
 parser.add_argument("--instruct", default=None,
                     help="Raw instruct text (overrides --style)")
 parser.add_argument("--daemon", action="store_true",
@@ -89,6 +91,8 @@ def _try_daemon(text):
 
 if args.daemon:
     cmd = [JARVIS, "serve", "--model", MODEL]
+    if args.dtype:
+        cmd += ["--dtype", args.dtype]
     os.execvp(cmd[0], cmd)
 
 text = " ".join(args.text) or sys.stdin.read().strip()
@@ -118,6 +122,8 @@ elif args.fx:
 if not args.no_fast:
     cmd += ["--fast"]
 cmd += ["--chunk-size", str(args.chunk_size)]
+if args.dtype:
+    cmd += ["--dtype", args.dtype]
 if args.instruct:
     cmd += ["--instruct", args.instruct]
 
