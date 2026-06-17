@@ -255,15 +255,6 @@ Eliminates first-request cold-start penalty.
 
 **Impact:** First client call gets warm CUDA kernels instead of 30-60s compile penalty.
 
-### D. F16 → BF16 Half-Precision Fix
-F16 (IEEE half, 5-bit exponent) overflows on attention scores → NaN/garbage. BF16 (bfloat16, 8-bit exponent like F32) avoids overflow.
-
-| File | Change |
-|------|--------|
-| `main.rs:158`, `serve.rs:51`, `repl.rs:10` | `"f16" => DType::BF16` (was `DType::F16`) |
-
-**Impact:** RTX 5060 (Blackwell) supports BF16 natively. ~2x speed + stable inference. No more "unexpected dtype" errors or garbage output.
-
 ### E. De-duplicate style_to_instruct (P6)
 Moved duplicated `style_to_instruct` from `main.rs` and `serve.rs` into `tts.rs` as a shared public function.
 
