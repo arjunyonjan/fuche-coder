@@ -6,6 +6,7 @@ import os
 import socket
 import subprocess
 import sys
+import time
 
 JARVIS_DIR = os.path.expanduser("~/projects/rust-ai/jarvis-rs")
 JARVIS = os.path.join(JARVIS_DIR, "target/release/jarvis-rs")
@@ -89,6 +90,17 @@ def _try_daemon(text):
     return pcm, sample_rate
 
 
+def _wait_playback(proc, timeout=30):
+    """Wait for paplay/aplay to finish, kill if it hangs."""
+    t0 = time.time()
+    while time.time() - t0 < timeout:
+        if proc.poll() is not None:
+            return
+        time.sleep(0.1)
+    proc.kill()
+    proc.wait()
+
+
 if args.daemon:
     cmd = [JARVIS, "serve", "--model", MODEL]
     if args.dtype:
@@ -109,7 +121,7 @@ if result is not None:
     )
     paplay.stdin.write(pcm)
     paplay.stdin.close()
-    paplay.wait()
+    _wait_playback(paplay)
     print(f"  ✓ {text[:60]}… (daemon)", file=sys.stderr)
     sys.exit(0 if paplay.returncode == 0 else 1)
 
@@ -135,7 +147,7 @@ paplay = subprocess.Popen(
 )
 
 jarvis.stdout.close()
-paplay.wait()
+_wait_playback(paplay)
 jarvis.wait()
 
 if jarvis.returncode != 0:
