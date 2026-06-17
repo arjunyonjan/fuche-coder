@@ -2,8 +2,16 @@
 cd ~/fuche-coder
 source venv/bin/activate
 [ -f ~/.fuche/env ] && source ~/.fuche/env
+
 if [ "$1" = "tts" ]; then
     shift
+    # Auto-start daemon if socket is missing
+    if [ ! -S /tmp/jarvis.sock ]; then
+        echo "Daemon not found, starting jarvis-rs serve..."
+        cd ~/projects/rust-ai/jarvis-rs && ./target/release/jarvis-rs serve --socket /tmp/jarvis.sock > /tmp/jarvis.log 2>&1 &
+        echo "Waiting for model to load..."
+        while [ ! -S /tmp/jarvis.sock ]; do sleep 1; done
+    fi
     python3 tts.py "$@"
 else
     python3 main.py "$@"

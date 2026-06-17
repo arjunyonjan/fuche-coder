@@ -79,7 +79,28 @@ def search_web(q: str) -> str:
 
 
 @mcp.tool()
+def speak(text: str, voice: str = "ryan", model: str = "qwen") -> str:
+    \"\"\"Trigger Text-to-Speech via fuche tts. Supports 'qwen' (daemon) and 'kokoro' models.\"\"\"
+    import subprocess
+    try:
+        # Construct the fuche command
+        cmd = ["fuche", "tts", text]
+        if model != "qwen":
+            cmd.extend(["--model", model])
+        if voice != "ryan":
+            cmd.extend(["--voice", voice])
+        
+        # Execute via the bash entrypoint
+        result = subprocess.run(cmd, capture_output=True, text=True, check=True)
+        return f"Speech triggered successfully. Output: {result.stdout.strip()}"
+    except subprocess.CalledProcessError as e:
+        return f"TTS failed: {e.stderr or str(e)}"
+    except Exception as e:
+        return f"Unexpected error: {str(e)}"
+
+@mcp.tool()
 def get_status() -> str:
+
     """Return Fuche system status: models loaded, online state, cache entries."""
     return f"Coder={models.code or '(none)'}, Reasoner={models.general or '(none)'}, Crawl={models.crawl} | Online: {is_online()} | Cache: {len(cache._memory) + len(cache._disk)} entries"
 

@@ -173,10 +173,14 @@ Uncommitted changes:
 | `~/fuche-coder/tts.py` | ~95 | Daemon try/fallback + `--daemon` flag |
 | `~/projects/rust-ai/jarvis-rs/src/serve.rs` | ~168 | **New** — Unix socket daemon + PERF instrumentation |
 | `~/projects/rust-ai/jarvis-rs/src/main.rs` | ~30 | `Serve` subcommand + flash-attn cleanup |
-| `~/projects/rust-ai/jarvis-rs/src/tts.rs` | ~136 | Removed `use_flash_attn`; added `subtalker_do_sample:false`, `repetition_penalty:1.0`, dynamic `max_new_tokens` |
-| `~/projects/rust-ai/jarvis-rs/src/repl.rs` | ~3 | Removed `use_flash_attn` param |
-| `~/projects/rust-ai/jarvis-rs/src/dsp.rs` | ~52 | **New** — `BassBoost` biquad low-shelf filter |
+| `~/projects/rust-ai/jarvis-rs/src/tts.rs` | ~166 | Removed `use_flash_attn`; added `subtalker_do_sample:false`, `repetition_penalty:1.0`, dynamic `max_new_tokens`; **f32 pipeline**: `samples: Vec<f32>`, `to_s16le()`, `apply_fx()`, token-aware `max_new_tokens` |
+| `~/projects/rust-ai/jarvis-rs/src/repl.rs` | ~3 | Removed `use_flash_attn` param; updated to `play_f32()` |
+| `~/projects/rust-ai/jarvis-rs/src/dsp.rs` | ~58 | **New** — `BassBoost` biquad low-shelf filter; `FxProcessor::process(&mut [f32])` |
 | `~/projects/rust-ai/jarvis-rs/src/fx_config.rs` | ~90 | `BassBoostParams`, `bassy_preset()`, JARVIS preset tuning |
+| `~/projects/rust-ai/jarvis-rs/src/audio.rs` | ~55 | Added `play_f32()` for native f32 playback; refactored `play_inner()` |
+| `~/projects/rust-ai/jarvis-rs/src/serve.rs` | ~170 | **New** — Unix socket daemon + PERF instrumentation; f32 pipeline; warm-up on startup |
+| `~/projects/rust-ai/jarvis-rs/src/main.rs` | ~30 | `Serve` subcommand + flash-attn cleanup; f32 pipeline: `apply_fx`, `to_s16le`, `play_f32` |
+| `~/projects/rust-ai/qwen_tts_patched/src/model/generate.rs` | ~3 | Streaming callback: `Vec<i16>` → `Vec<f32>` |
 | `~/projects/rust-ai/jarvis-rs/Cargo.toml` | 2 | +serde_json, -flash-attn |
 
 ---
@@ -197,7 +201,7 @@ d42104f  Add --fast, --chunk-size, --dtype CLI flags + FP16 toggle
 ```
 No remote configured on jarvis-rs.
 
-**Uncommitted:** `serve.rs` (untracked), `tts.rs`/`main.rs`/`Cargo.toml` (modified for serve+opts), `dsp.rs`/`fx_config.rs` (modified for BassBoost + preset tuning).
+**Uncommitted:** `serve.rs` (untracked), `tts.rs`/`main.rs`/`audio.rs`/`Cargo.toml` (modified for serve+opts), `dsp.rs`/`fx_config.rs` (modified for BassBoost + preset tuning + f32 pipeline), `qwen_tts_patched/src/model/generate.rs` (streaming callback f32).
 
 ---
 
@@ -213,6 +217,54 @@ fuche tts "text" --voice vivian               # switch voice
 fuche tts "text" --instruct "Speak like Yoda" # custom instruct
 fuche tts --daemon                            # start daemon (blocking)
 ```
+
+---
+
+## Optimizations (June 17)
+
+### A. Native f32 DSP Pipeline
+Eliminated redundant i16↔f32 conversions in the FX chain.
+
+| File | Change |
+|------|--------|
+| `jarvis-rs/src/tts.rs` | `TTSResult.samples: Vec<f32>`; added `to_s16le()`, `apply_fx()`, `len_audio_ms()` helpers; `audio_to_result` returns f32 directly |
+| `jarvis-rs/src/dsp.rs` | `FxProcessor::process(&mut [f32])` — no more internal i16↔f32 conversion |
+| `jarvis-rs/src/serve.rs` | Fast path uses `result.apply_fx()` + `result.to_s16le()`; removed unused `dsp` import |
+| `jarvis-rs/src/main.rs` | All paths use f32 pipeline; WAV writes use `s16` conversion; playback uses `play_f32()` |
+| `jarvis-rs/src/audio.rs` | Added `play_f32()` for native f32 playback; refactored `play()` into shared `play_inner()` |
+| `jarvis-rs/src/repl.rs` | Updated to `audio::play_f32()` |
+| `qwen_tts_patched/src/model/generate.rs` | Streaming callback now passes `Vec<f32>` instead of `Vec<i16>` |
+
+**Impact:** Removes 2 unnecessary array conversions per chunk (i16→f32→i16). DSP processes natively in f32.
+
+### B. Better max_new_tokens Estimation
+Improved estimate for greedy decoding to avoid truncating long texts.
+
+| File | Change |
+|------|--------|
+| `jarvis-rs/src/tts.rs:95` | Uses actual token count via `model.tokenize_text()` when available (×8, cap 2048); falls back to char count (×3, cap 2048). Old: `(text.len() * 3).min(512).max(64)` |
+
+**Impact:** Longer texts no longer clipped; cap raised from 512→2048 frames (~170s max).
+
+### C. Daemon Pre-warm
+Eliminates first-request cold-start penalty.
+
+| File | Change |
+|------|--------|
+| `jarvis-rs/src/serve.rs:59` | Spawns background thread after model load that runs a fast dummy inference ("Hello" + flanger/reverb FX) |
+
+**Impact:** First client call gets warm CUDA kernels instead of 30-60s compile penalty.
+
+### D. F16 → BF16 Half-Precision Fix
+F16 (IEEE half, 5-bit exponent) overflows on attention scores → NaN/garbage. BF16 (bfloat16, 8-bit exponent like F32) avoids overflow.
+
+| File | Change |
+|------|--------|
+| `main.rs:158`, `serve.rs:51`, `repl.rs:10` | `"f16" => DType::BF16` (was `DType::F16`) |
+
+**Impact:** RTX 5060 (Blackwell) supports BF16 natively. ~2x speed + stable inference. No more "unexpected dtype" errors or garbage output.
+
+---
 
 ## Performance
 
