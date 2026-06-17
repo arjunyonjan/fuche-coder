@@ -264,6 +264,15 @@ F16 (IEEE half, 5-bit exponent) overflows on attention scores → NaN/garbage. B
 
 **Impact:** RTX 5060 (Blackwell) supports BF16 natively. ~2x speed + stable inference. No more "unexpected dtype" errors or garbage output.
 
+### E. De-duplicate style_to_instruct (P6)
+Moved duplicated `style_to_instruct` from `main.rs` and `serve.rs` into `tts.rs` as a shared public function.
+
+### F. Thread pool daemon (P3)
+Replaced per-client `std::thread::spawn` with 4 pre-spawned worker threads using `mpsc` channel. No `threadpool` dependency needed.
+
+### G. Graceful daemon shutdown (P7)
+Added `ctrlc` signal handler to clean up `/tmp/jarvis.sock` on Ctrl+C.
+
 ---
 
 ## Performance
