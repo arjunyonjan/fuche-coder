@@ -1,7 +1,6 @@
 #!/usr/bin/env python3
 import subprocess
 import sys
-import os
 
 def check_nvidia_smi():
     try:
@@ -37,9 +36,9 @@ def check_ollama_gpu():
         return None
 
 def optimize_model(model_name):
-    print(f"  Device map: cuda:0")
-    print(f"  Data type:  float16")
-    print(f"  Options:    --num-gpu 999 --num-thread 4")
+    print("  Device map: cuda:0")
+    print("  Data type:  float16")
+    print("  Options:    --num-gpu 999 --num-thread 4")
     print(f"\n  Run with:\n    ollama run {model_name}")
     print(f"\n  Or for best perf:\n    OLLAMA_LOAD_IN_4BIT=1 OLLAMA_FLASH_ATTENTION=1 ollama run {model_name}")
 
@@ -65,7 +64,7 @@ if __name__ == "__main__":
 
     ollama = check_ollama_gpu()
     if ollama:
-        print(f"✅ Ollama GPU: enabled")
+        print("✅ Ollama GPU: enabled")
         print(f"   {ollama.strip()}")
     else:
         print("❌ Ollama GPU: no models loaded or not detected")

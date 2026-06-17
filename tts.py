@@ -26,6 +26,8 @@ parser.add_argument("--chunk-size", type=int, default=2,
                     help="Stream chunk size (lower = lower latency)")
 parser.add_argument("--dtype", default="f32", choices=["f32", "f16"],
                     help="Model precision (f16 needs AC power)")
+parser.add_argument("--flash-attn", action="store_true",
+                    help="Use flash attention (faster on CUDA)")
 parser.add_argument("--instruct", default=None,
                     help="Raw instruct text (overrides --style)")
 args = parser.parse_args()
@@ -46,6 +48,8 @@ if not args.no_fast:
 cmd += ["--chunk-size", str(args.chunk_size)]
 if args.dtype != "f32":
     cmd += ["--dtype", args.dtype]
+if args.flash_attn:
+    cmd += ["--flash-attn"]
 if args.instruct:
     cmd += ["--instruct", args.instruct]
 

@@ -1,6 +1,5 @@
 #!/usr/bin/env python3
 import subprocess
-import sys
 
 def check_cuda():
     print("🔍 Checking CUDA availability...")
@@ -21,7 +20,7 @@ def check_cuda():
             else:
                 print("✅ Standard GPU — 3-5x speed expected")
             return True
-    except:
+    except Exception:
         pass
     
     print("❌ CUDA not available — running CPU-only")

@@ -1,0 +1,16 @@
+{
+  "sources": [
+    {
+      "id": "sharesansar",
+      "label": "NEPSE Market Summary (sharesansar.com)",
+      "match": ["nepalstock", "nepse", "market summary", "turnover", "traded shares", "market cap"],
+      "url": "https://www.sharesansar.com/market-summary"
+    },
+    {
+      "id": "merolagani",
+      "label": "NEPSE News & Events (merolagani.com)",
+      "match": ["dividend", "ipo", "agm", "book close", "announcement", "bonus shares"],
+      "url": "https://merolagani.com/"
+    }
+  ]
+}

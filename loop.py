@@ -40,7 +40,11 @@ def quality_check(answer, question):
     return min(keyword_ratio * 0.6 + length_score * 0.4, 1.0)
 
 def refine_keywords(original, current, quality):
-    return extract_keywords(original)
+    words = extract_keywords(original).split()
+    if quality < 0.3 or len(words) <= 1:
+        return original
+    # Drop last keyword to broaden — different results may surface
+    return ' '.join(words[:-1])
 
 def search(query):
     from crawler import search_and_extract
@@ -49,34 +53,33 @@ def search(query):
     except Exception as e:
         return f"Search failed: {e}"
 
-def self_heal(question, max_loops=3):
+def self_heal(question, max_loops=3, verbose=True):
     keywords = extract_keywords(question) or question
-    best_keywords = keywords
     best_quality = 0.0
     best_result = ""
+    out = sys.stderr if not verbose else sys.stdout
     for loop in range(1, max_loops + 1):
-        print(f"Loop {loop}: Searching with '{keywords}'")
+        print(f"Loop {loop}: Searching with '{keywords}'", file=out)
         result = search(keywords)
         quality = quality_check(result, question)
-        print(f"Quality: {quality:.2f}")
+        print(f"Quality: {quality:.2f}", file=out)
 
         if quality > best_quality:
             best_quality = quality
             best_result = result
-            best_keywords = keywords
 
         if quality >= 0.7:
-            print("✅ Good result")
+            print("✅ Good result", file=out)
             return result
 
         if loop < max_loops:
             keywords = refine_keywords(question, keywords, quality)
             if quality < 0.3:
                 keywords = question
-            print(f"Refined keywords: {keywords}")
+            print(f"Refined keywords: {keywords}", file=out)
             time.sleep(1)
 
-    print("⚠️ Max loops reached, returning best result")
+    print("⚠️ Max loops reached, returning best result", file=out)
     return best_result
 
 if __name__ == "__main__":

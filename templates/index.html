@@ -1,0 +1,392 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width,initial-scale=1.0">
+  <title>Fuche AI</title>
+  <script src="https://cdn.tailwindcss.com"></script>
+  <script>
+    tailwind.config = { darkMode: 'class' }
+  </script>
+  <script src="https://unpkg.com/htmx.org@2"></script>
+  <script src="https://cdn.jsdelivr.net/npm/marked/marked.min.js"></script>
+  <style>
+    html:not(.dark) body { background: #fff; color: #111; }
+    html:not(.dark) .border-gray-800 { border-color: #e5e7eb; }
+    html:not(.dark) .bg-gray-900 { background: #f9fafb; }
+    html:not(.dark) .bg-gray-800 { background: #f3f4f6; }
+    html:not(.dark) .text-gray-400 { color: #6b7280; }
+    html:not(.dark) .text-gray-500 { color: #9ca3af; }
+    html:not(.dark) .text-gray-600 { color: #d1d5db; }
+    html:not(.dark) .bg-blue-600 { background: #3b82f6; }
+    html:not(.dark) .text-blue-300 { color: #dbeafe; }
+    html:not(.dark) .border-gray-700 { border-color: #d1d5db; }
+    html:not(.dark) .hover\\:text-gray-200:hover { color: #374151; }
+    html:not(.dark) .hover\\:bg-blue-700:hover { background: #2563eb; }
+    html:not(.dark) .focus\\:border-blue-500:focus { border-color: #3b82f6; }
+    @keyframes pulse { 0%,100% { opacity:.3; } 50% { opacity:1; } }
+    .loading { animation: pulse 1.2s ease-in-out infinite; }
+  </style>
+</head>
+<body class="bg-gray-950 text-gray-100 h-screen flex justify-center">
+  <div class="w-full max-w-2xl mx-auto p-4 flex flex-col h-screen">
+
+    <header class="flex justify-between items-center pb-3 border-b border-gray-800">
+      <h1 class="text-xl font-bold">⚡ Fuche AI</h1>
+      <div class="flex items-center gap-1">
+        <span class="text-xs text-gray-500">Coder</span>
+        <select id="code-m" class="text-xs bg-gray-900 border border-gray-700 rounded px-1 py-0.5 w-36 text-gray-400" onchange="setModel('code',this.value)"></select>
+        <span class="text-xs text-gray-500">Reasoner</span>
+        <select id="gen-m" class="text-xs bg-gray-900 border border-gray-700 rounded px-1 py-0.5 w-36 text-gray-400" onchange="setModel('general',this.value)"></select>
+        <span id="vram-indicator" class="text-xs text-gray-500 cursor-help ml-1" title=""></span>
+        <button id="crawl-btn" onclick="toggleCrawl()" class="text-sm transition-colors" title="Web search">🌐</button>
+        <button id="theme-btn" onclick="toggleTheme()" class="text-sm text-gray-400 hover:text-gray-200 transition-colors" title="Toggle theme">🌙</button>
+      </div>
+      <div id="vram-bar" class="hidden flex gap-1 justify-end"></div>
+    </header>
+
+    <div id="messages" class="flex-1 overflow-y-auto py-3 space-y-3"></div>
+
+    <form id="chat-form" class="flex gap-2 py-3 border-t border-gray-800">
+      <input id="chat-input" type="text" name="q" required autofocus
+             class="flex-1 px-4 py-2.5 rounded-lg bg-gray-900 border border-gray-700 text-sm focus:outline-none focus:border-blue-500"
+             placeholder="Ask anything...">
+      <button id="send-btn" type="submit"
+              class="px-5 py-2.5 rounded-lg bg-blue-600 hover:bg-blue-700 text-sm font-medium transition-colors">Send</button>
+      <button id="cancel-btn" type="button"
+              class="hidden px-3 py-2.5 rounded-lg bg-red-600 hover:bg-red-700 text-sm font-medium transition-colors">✕ Cancel</button>
+    </form>
+
+    <div class="flex gap-2 pb-2 flex-wrap">
+      <button hx-get="/history" hx-target="#messages" hx-swap="innerHTML"
+              class="px-3 py-1.5 rounded-md border border-gray-700 text-gray-400 hover:text-gray-200 text-sm transition-colors">
+        📋 History
+      </button>
+      <input id="si" type="text" placeholder="Search query..."
+             class="hidden px-3 py-1.5 rounded-md bg-gray-900 border border-gray-700 text-sm"
+             hx-get="/search" hx-target="#messages" hx-swap="innerHTML"
+             hx-trigger="keyup[key=='Enter']" name="q">
+      <button onclick="document.getElementById('si').classList.toggle('hidden')"
+              class="px-3 py-1.5 rounded-md border border-gray-700 text-gray-400 hover:text-gray-200 text-sm transition-colors">
+        🔍 Search
+      </button>
+      <button onclick="exportChat()"
+              class="px-3 py-1.5 rounded-md border border-gray-700 text-gray-400 hover:text-gray-200 text-sm transition-colors">
+        ⬇ Export
+      </button>
+      <button onclick="document.getElementById('import-file').click()"
+              class="px-3 py-1.5 rounded-md border border-gray-700 text-gray-400 hover:text-gray-200 text-sm transition-colors">
+        ⬆ Import
+      </button>
+      <button onclick="clearChat()"
+              class="px-3 py-1.5 rounded-md border border-gray-700 text-gray-400 hover:text-gray-200 text-sm transition-colors">
+        🗑 Clear
+      </button>
+    </div>
+
+  </div>
+
+<script>
+const STORAGE_KEY = 'fuche_chat';
+const THEME_KEY = 'fuche_theme';
+let chatLog = loadChat();
+let abortController = null;
+
+// ── Theme ──
+function initTheme() {
+  const saved = localStorage.getItem(THEME_KEY);
+  const prefersDark = window.matchMedia('(prefers-color-scheme: dark)').matches;
+  const isDark = saved !== null ? saved === 'dark' : prefersDark;
+  document.documentElement.classList.toggle('dark', isDark);
+  document.getElementById('theme-btn').textContent = isDark ? '🌙' : '☀️';
+}
+
+function toggleTheme() {
+  const isDark = !document.documentElement.classList.contains('dark');
+  document.documentElement.classList.toggle('dark', isDark);
+  localStorage.setItem(THEME_KEY, isDark ? 'dark' : 'light');
+  document.getElementById('theme-btn').textContent = isDark ? '🌙' : '☀️';
+}
+
+// ── Chat persistence ──
+function loadChat() {
+  try { return JSON.parse(localStorage.getItem(STORAGE_KEY)) || []; }
+  catch { return []; }
+}
+
+function saveChat() {
+  localStorage.setItem(STORAGE_KEY, JSON.stringify(chatLog.slice(-100)));
+}
+
+function renderMessages() {
+  const el = document.getElementById('messages');
+  el.innerHTML = chatLog.map(m =>
+    m.role === 'user'
+      ? `<div class="flex justify-end"><div class="bg-blue-600 px-4 py-2.5 rounded-2xl rounded-br-sm max-w-[80%]"><span class="text-xs text-blue-300 block">${esc(m.badge)}</span>${esc(m.text)}</div></div>`
+      : `<div class="flex justify-start"><div class="bg-gray-800 px-4 py-2.5 rounded-2xl rounded-bl-sm max-w-[80%]"><span class="text-xs text-gray-400 block">🤖 ${esc(m.model)}</span><div class="prose prose-invert max-w-none text-sm mt-1">${marked.parse(stripTags(m.text))}</div></div></div>`
+  ).join('');
+  el.scrollTop = el.scrollHeight;
+  addCopyButtons();
+}
+
+function addCopyButtons() {
+  document.querySelectorAll('pre').forEach(pre => {
+    if (pre.querySelector('.copy-btn')) return;
+    const btn = document.createElement('button');
+    btn.className = 'copy-btn text-xs text-gray-400 hover:text-white float-right';
+    btn.textContent = '📋';
+    btn.onclick = () => {
+      navigator.clipboard.writeText(pre.textContent);
+      btn.textContent = '✅';
+      setTimeout(() => btn.textContent = '📋', 1500);
+    };
+    pre.style.position = 'relative';
+    pre.prepend(btn);
+  });
+}
+
+function stripTags(s) {
+  return s.replace(/<think>[\s\S]*?<\/think>/g, '').replace(/<\/?think>/g, '').replace(/<\/?answer>/g, '');
+}
+
+function esc(s) {
+  const d = document.createElement('div');
+  d.textContent = s;
+  return d.innerHTML;
+}
+
+function addUserMessage(text, badge) {
+  chatLog.push({ role: 'user', text, badge });
+  saveChat();
+  const el = document.getElementById('messages');
+  el.innerHTML += `<div class="flex justify-end"><div class="bg-blue-600 px-4 py-2.5 rounded-2xl rounded-br-sm max-w-[80%]"><span class="text-xs text-blue-300 block">${esc(badge)}</span>${esc(text)}</div></div>`;
+  el.scrollTop = el.scrollHeight;
+}
+
+function addAssistantMessage(model) {
+  const el = document.getElementById('messages');
+  const div = document.createElement('div');
+  div.className = 'flex justify-start';
+  div.innerHTML = `<div class="bg-gray-800 px-4 py-2.5 rounded-2xl rounded-bl-sm max-w-[80%]"><span class="text-xs text-gray-400 block">🤖 ${esc(model)}</span><div class="text-sm mt-1 streaming"><span class="loading">thinking</span></div></div>`;
+  el.appendChild(div);
+  el.scrollTop = el.scrollHeight;
+  return div.querySelector('.streaming');
+}
+
+function finalizeAssistantMessage(el, model, text) {
+  el.innerHTML = marked.parse(text);
+  el.classList.remove('streaming');
+  chatLog.push({ role: 'assistant', text, model });
+  saveChat();
+  addCopyButtons();
+  el.closest('.flex').scrollIntoView({ behavior: 'smooth' });
+}
+
+function showStreaming(streaming) {
+  document.getElementById('send-btn').classList.toggle('hidden', streaming);
+  document.getElementById('cancel-btn').classList.toggle('hidden', !streaming);
+  document.getElementById('chat-input').disabled = streaming;
+}
+
+// ── Chat submit with abort support ──
+document.getElementById('chat-form').addEventListener('submit', async function(e) {
+  e.preventDefault();
+  const input = document.getElementById('chat-input');
+  const q = input.value.trim();
+  if (!q) return;
+  input.value = '';
+
+  const isCode = /write|create|implement|function|class|const|import/.test(q);
+  const actualModel = isCode ? codeModel : genModel;
+  const badge = isCode ? '💻 Coder' : '🧠 Reasoner';
+  addUserMessage(q, badge);
+
+  const streamEl = addAssistantMessage(actualModel);
+  let full = '';
+
+  abortController = new AbortController();
+  showStreaming(true);
+
+  try {
+    const resp = await fetch('/ask/stream', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/x-www-form-urlencoded' },
+      body: 'q=' + encodeURIComponent(q),
+      signal: abortController.signal
+    });
+    const reader = resp.body.getReader();
+    const decoder = new TextDecoder();
+    let buffer = '';
+
+    while (true) {
+      const { done, value } = await reader.read();
+      if (done) break;
+      buffer += decoder.decode(value, { stream: true });
+      const lines = buffer.split('\n\n');
+      buffer = lines.pop() || '';
+
+      for (const line of lines) {
+        if (!line.startsWith('data: ')) continue;
+        try {
+          const data = JSON.parse(line.slice(6));
+          if (data.meta) {
+            streamEl.innerHTML = '<span class="loading">generating</span>';
+          }
+          if (data.token) {
+            if (full === '') streamEl.innerHTML = '';
+            full += data.token;
+            streamEl.textContent = stripTags(full);
+            streamEl.closest('.flex').scrollIntoView({ behavior: 'smooth' });
+          }
+          if (data.done) {
+            finalizeAssistantMessage(streamEl, actualModel, data.full || stripTags(full));
+          }
+        } catch {}
+      }
+    }
+  } catch (err) {
+    if (err.name === 'AbortError') {
+      streamEl.textContent = stripTags(full) || '(cancelled)';
+      streamEl.closest('.flex').scrollIntoView({ behavior: 'smooth' });
+    } else {
+      streamEl.textContent = 'Error: ' + err.message;
+    }
+  }
+
+  abortController = null;
+  showStreaming(false);
+  input.focus();
+});
+
+// Cancel button
+document.getElementById('cancel-btn').onclick = () => {
+  if (abortController) {
+    abortController.abort();
+    abortController = null;
+  }
+};
+
+let codeModel = '';
+let genModel = '';
+
+async function loadModels() {
+  try {
+    const resp = await fetch('/models');
+    const data = await resp.json();
+    codeModel = data.code;
+    genModel = data.general;
+    const opts = data.available.map(m => `<option value="${m.name}">${m.name} (${m.size_gb}GB)</option>`).join('');
+    for (const sel of ['code-m', 'gen-m']) {
+      document.getElementById(sel).innerHTML = '<option value="">None</option>' + opts;
+    }
+    document.getElementById('code-m').value = codeModel;
+    document.getElementById('gen-m').value = genModel;
+    updateCrawlBtn(data.crawl);
+  } catch {}
+}
+
+async function setModel(role, name) {
+  const body = role === 'code' ? {code: name} : {general: name};
+  try {
+    const resp = await fetch('/models', {method:'POST', headers:{'Content-Type':'application/json'}, body:JSON.stringify(body)});
+    const data = await resp.json();
+    if (role === 'code') codeModel = data.code;
+    else genModel = data.general;
+    updateCrawlBtn(data.crawl);
+    loadVRAM();
+  } catch {}
+}
+
+async function toggleCrawl() {
+  const btn = document.getElementById('crawl-btn');
+  const current = btn.dataset.active === 'true';
+  try {
+    const resp = await fetch('/models', {method:'POST', headers:{'Content-Type':'application/json'}, body:JSON.stringify({crawl: !current})});
+    const data = await resp.json();
+    updateCrawlBtn(data.crawl);
+    loadVRAM();
+  } catch {}
+}
+
+function updateCrawlBtn(active) {
+  const btn = document.getElementById('crawl-btn');
+  btn.dataset.active = active ? 'true' : 'false';
+  btn.style.color = active ? '#22c55e' : '#6b7280';
+}
+
+async function loadVRAM() {
+  try {
+    const resp = await fetch('/vram');
+    const v = await resp.json();
+    const el = document.getElementById('vram-indicator');
+    const bar = document.getElementById('vram-bar');
+    if (!v.available) { el.textContent = '🖥 CPU'; el.style.color = ''; return; }
+    const free = v.free_gb;
+    const pct = Math.round(free / v.total_gb * 100);
+    el.textContent = `🖥 ${free}GB`;
+    el.style.color = free > 3 ? '#22c55e' : free > 1 ? '#eab308' : '#ef4444';
+    el.title = `${v.gpu} — ${v.used_gb}GB used / ${v.total_gb}GB total`;
+
+    bar.innerHTML = '';
+    if (v.recommended.code !== codeModel || v.recommended.general !== genModel) {
+      bar.classList.remove('hidden');
+      const pills = [];
+      if (v.recommended.code !== codeModel) pills.push(`<b>${v.recommended.code}</b>`);
+      if (v.recommended.general !== genModel) pills.push(`<b>${v.recommended.general}</b>`);
+      bar.innerHTML = `<span class="text-xs text-blue-400 cursor-pointer hover:text-blue-300 transition-colors">⬆ ${pills.join(' · ')}</span>`;
+      bar.onclick = async () => {
+        await setModel('code', v.recommended.code);
+        await setModel('general', v.recommended.general);
+        loadVRAM();
+      };
+    } else {
+      bar.classList.add('hidden');
+    }
+  } catch {}
+}
+
+// ── Export / Import / Clear ──
+function exportChat() {
+  const blob = new Blob([JSON.stringify(chatLog, null, 2)], { type: 'application/json' });
+  const a = document.createElement('a');
+  a.href = URL.createObjectURL(blob);
+  a.download = `fuche-chat-${new Date().toISOString().slice(0, 10)}.json`;
+  a.click();
+}
+
+function importChat(event) {
+  const file = event.target.files[0];
+  if (!file) return;
+  const reader = new FileReader();
+  reader.onload = function(e) {
+    try {
+      const data = JSON.parse(e.target.result);
+      if (Array.isArray(data)) {
+        chatLog = chatLog.concat(data);
+        saveChat();
+        renderMessages();
+      }
+    } catch (err) {
+      alert('Invalid file: ' + err.message);
+    }
+  };
+  reader.readAsText(file);
+  event.target.value = '';
+}
+
+function clearChat() {
+  if (confirm('Clear all messages?')) {
+    chatLog = [];
+    localStorage.removeItem(STORAGE_KEY);
+    document.getElementById('messages').innerHTML = '';
+  }
+}
+
+// ── Init ──
+initTheme();
+renderMessages();
+loadModels();
+loadVRAM();
+</script>
+</body>
+</html>

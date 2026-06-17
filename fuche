@@ -1,4 +1,10 @@
 #!/bin/bash
 cd ~/fuche-coder
 source venv/bin/activate
-python3 main.py "$@"
+[ -f ~/.fuche/env ] && source ~/.fuche/env
+if [ "$1" = "tts" ]; then
+    shift
+    python3 tts.py "$@"
+else
+    python3 main.py "$@"
+fi

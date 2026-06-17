@@ -1,5 +1,7 @@
 #!/usr/bin/env python3
+import json
 import logging
+import os
 import re
 import sys
 import urllib3
@@ -15,6 +17,7 @@ log = logging.getLogger(__name__)
 
 HEADERS = {'User-Agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36'}
 URL_PATTERN = re.compile(r'^(https?://)?([a-zA-Z0-9-]+\.)+[a-zA-Z]{2,}(/[^\s]*)?$')
+SOURCES_FILE = os.path.join(os.path.dirname(os.path.abspath(__file__)), "sources.json")
 
 
 def extract_text_from_html(html):
@@ -30,7 +33,7 @@ def fetch_page_text(url, timeout=8):
         try:
             resp = requests.get(url, headers=HEADERS, timeout=timeout, verify=True)
         except SSLError:
-            log.info(f"  ↳ SSL error — retrying without verification")
+            log.info("  ↳ SSL error — retrying without verification")
             resp = requests.get(url, headers=HEADERS, timeout=timeout, verify=False)
         if resp.status_code != 200:
             log.warning(f"  ↳ HTTP {resp.status_code} — {url}")
@@ -80,7 +83,31 @@ def fetch_page_text_js(url, timeout=15):
     return ""
 
 
+def load_sources():
+    try:
+        with open(SOURCES_FILE) as f:
+            return json.load(f).get("sources", [])
+    except (FileNotFoundError, json.JSONDecodeError) as e:
+        log.warning(f"Could not load sources.json: {e}")
+        return []
+
+def check_sources(query):
+    sources = load_sources()
+    q_lower = query.lower()
+    for source in sources:
+        if any(kw in q_lower for kw in source["match"]):
+            log.info(f"Known source match: {source['label']}")
+            content = fetch_page_text(source["url"])
+            if content:
+                return f"Source: {source['label']} ({source['url']})\n\n{content}"
+    return None
+
 def search_and_extract(query, max_results=3):
+    # Check known sources first
+    result = check_sources(query)
+    if result:
+        return result
+
     # If query looks like a URL, try to fetch it directly first
     if URL_PATTERN.match(query.strip()):
         url = query.strip()
@@ -91,7 +118,7 @@ def search_and_extract(query, max_results=3):
         if len(content) >= 100:
             return f"Content from {url}:\n\n{content}"
         # If too little content (JS SPA), try headless render
-        log.info(f"  ↳ HTML too short — trying JS render")
+        log.info("  ↳ HTML too short — trying JS render")
         content_js = fetch_page_text_js(url)
         if content_js:
             return f"Content from {url} (JS rendered):\n\n{content_js}"
