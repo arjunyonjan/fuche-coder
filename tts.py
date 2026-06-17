@@ -8,11 +8,19 @@ import subprocess
 import sys
 import time
 
-JARVIS_DIR = os.path.expanduser("~/projects/rust-ai/jarvis-rs")
-JARVIS = os.path.join(JARVIS_DIR, "target/release/jarvis-rs")
-MODEL = os.path.join(JARVIS_DIR, "models/Qwen3-TTS-12Hz-0.6B-CustomVoice")
+BINARY = os.path.expanduser("~/fuche-coder/jarvis-rs")
+MODEL = os.path.expanduser("~/projects/rust-ai/jarvis-rs/models/Qwen3-TTS-12Hz-0.6B-CustomVoice")
 VOICE = "ryan"
 SOCKET_PATH = "/tmp/jarvis.sock"
+
+
+def _player_cmd(rate):
+    """Return the best available audio player command for raw s16le PCM at given rate."""
+    try:
+        subprocess.run(["pactl", "info"], capture_output=True, timeout=2)
+        return ["paplay", "--raw", f"--rate={rate}", "--channels=1", "--format=s16le"]
+    except Exception:
+        return ["ffplay", "-nodisp", "-autoexit", "-f", "s16le", "-ar", str(rate), "-ac", "1", "-"]
 
 parser = argparse.ArgumentParser(description="Local TTS with jarvis-rs")
 parser.add_argument("text", nargs="*", help="Text to speak")
@@ -90,7 +98,7 @@ def _try_daemon(text):
     return pcm, sample_rate
 
 
-def _wait_playback(proc, timeout=30):
+def _wait_playback(proc, timeout=20):
     """Wait for paplay/aplay to finish, kill if it hangs."""
     t0 = time.time()
     while time.time() - t0 < timeout:
@@ -102,7 +110,7 @@ def _wait_playback(proc, timeout=30):
 
 
 if args.daemon:
-    cmd = [JARVIS, "serve", "--model", MODEL]
+    cmd = [BINARY, "serve", "--model", MODEL]
     if args.dtype:
         cmd += ["--dtype", args.dtype]
     os.execvp(cmd[0], cmd)
@@ -115,17 +123,16 @@ if not text:
 result = _try_daemon(text)
 if result is not None:
     pcm, sample_rate = result
-    paplay = subprocess.Popen(
-        ["paplay", "--raw", f"--rate={sample_rate}", "--channels=1", "--format=s16le"],
-        stdin=subprocess.PIPE
+    player = subprocess.Popen(
+        _player_cmd(sample_rate), stdin=subprocess.PIPE
     )
-    paplay.stdin.write(pcm)
-    paplay.stdin.close()
-    _wait_playback(paplay)
+    player.stdin.write(pcm)
+    player.stdin.close()
+    _wait_playback(player)
     print(f"  ✓ {text[:60]}… (daemon)", file=sys.stderr)
-    sys.exit(0 if paplay.returncode == 0 else 1)
+    sys.exit(0 if player.returncode == 0 else 1)
 
-cmd = [JARVIS, "run", text, "--model", MODEL, "--voice", args.voice, "--stdout",
+cmd = [BINARY, "run", text, "--model", MODEL, "--voice", args.voice, "--stdout",
        "--style", args.style]
 if args.preset:
     cmd += ["--preset", args.preset]
@@ -141,13 +148,12 @@ if args.instruct:
 
 jarvis = subprocess.Popen(cmd, stdout=subprocess.PIPE, stderr=subprocess.PIPE)
 
-paplay = subprocess.Popen(
-    ["paplay", "--raw", "--rate=24000", "--channels=1", "--format=s16le"],
-    stdin=jarvis.stdout
+player = subprocess.Popen(
+    _player_cmd(24000), stdin=jarvis.stdout
 )
 
 jarvis.stdout.close()
-_wait_playback(paplay)
+_wait_playback(player)
 jarvis.wait()
 
 if jarvis.returncode != 0:

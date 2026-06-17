@@ -8,7 +8,7 @@ if [ "$1" = "tts" ]; then
     # Auto-start daemon if socket is missing
     if [ ! -S /tmp/jarvis.sock ]; then
         echo "Daemon not found, starting jarvis-rs serve..."
-        cd ~/projects/rust-ai/jarvis-rs && ./target/release/jarvis-rs serve --socket /tmp/jarvis.sock > /tmp/jarvis.log 2>&1 &
+        cd ~/fuche-coder && ./jarvis-rs serve --socket /tmp/jarvis.sock > /tmp/jarvis.log 2>&1 &
         echo "Waiting for model to load (tail -f /tmp/jarvis.log to watch)..."
         while [ ! -S /tmp/jarvis.sock ]; do
             if [ -f /tmp/jarvis.log ]; then

@@ -105,9 +105,8 @@ def set_models(req: ModelSet):
     return {"status": "ok", "code": models.code, "general": models.general, "crawl": models.crawl}
 
 
-JARVIS_DIR = os.path.expanduser("~/projects/rust-ai/jarvis-rs")
-JARVIS = os.path.join(JARVIS_DIR, "target/release/jarvis-rs")
-JARVIS_MODEL = os.path.join(JARVIS_DIR, "models/Qwen3-TTS-12Hz-0.6B-CustomVoice")
+JARVIS = os.path.expanduser("~/fuche-coder/jarvis-rs")
+JARVIS_MODEL = os.path.expanduser("~/projects/rust-ai/jarvis-rs/models/Qwen3-TTS-12Hz-0.6B-CustomVoice")
 
 
 @app.get("/tts")

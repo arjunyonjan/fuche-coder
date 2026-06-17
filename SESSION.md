@@ -2,8 +2,8 @@
 
 ## Project Map
 
-- `~/fuche-coder/` — Python wrapper + `fuche` alias entry point
-- `~/projects/rust-ai/jarvis-rs/` — Rust TTS CLI (Qwen3-TTS-0.6B on CUDA)
+- `~/fuche-coder/` — Python wrapper + `fuche` alias entry point + **release binary** (`jarvis-rs`)
+- `~/projects/rust-ai/jarvis-rs/` — Rust TTS source + models (kept for development)
 - `~/projects/rust-ai/qwen_tts_patched/` — Patched Qwen TTS Rust crate
 
 ## Pipeline
@@ -12,9 +12,9 @@
 fuche tts "text"
   → ~/.bashrc PATH → ~/fuche-coder/fuche (bash wrapper)
   → source venv → python3 tts.py "$@"
-  → jarvis-rs run "text" --stdout --style calm --fx flanger,reverb
-                          --fast --chunk-size 2
-  → raw PCM (24kHz s16le) → pipe → paplay (speakers)
+  → ~/fuche-coder/jarvis-rs (release binary, no dep on rust-ai/)
+  → daemon socket /tmp/jarvis.sock (or subprocess fallback)
+  → raw PCM (24kHz s16le) → pipe → paplay (PulseAudio/WSLg) or ffplay
 ```
 
 All paths use `os.path.expanduser()` — no relative paths. Works from any directory.
@@ -62,7 +62,7 @@ Replaces hardcoded `8` in `synthesize_stream()` call. Lower values = lower first
 ### 4. jarvis-rs — --dtype f32|bf16
 
 ```rust
-#[arg(long, default_value = "f32")]
+#[arg(long, default_value = "bf16")]  // was "f32"
 dtype: String,
 ```
 
@@ -71,7 +71,7 @@ Threaded through `main.rs` → `tts.rs` → `repl.rs` → `tts.py`.
 
 **F16 removed:** 5-bit exponent overflows on attention scores → garbage output. Replaced with `--dtype bf16` (8-bit exponent, stable). BF16 uses tensor cores on RTX 5060 (CC 12.0).
 
-**BF16 status:** ✅ Verified — identical output to F32, ~1.34x speedup, 27% less CPU time.
+**BF16 status:** ✅ **Now default dtype** — no `--dtype bf16` needed. Identical output to F32, ~1.34x speedup, 27% less CPU time.
 
 ### 5. Flash attention (added then reverted)
 
@@ -141,16 +141,17 @@ Uncommitted changes:
 
 | Area | Status |
 |---|---|---|
-| Daemon daemon | ✅ Running (PID 8526), socket at `/tmp/jarvis.sock` |
-| PERF verification | ✅ **Confirmed** — see measurements below |
-| Optimized binary | ✅ Built, running, producing PERF logs |
-| Inference speed | **~1x real-time** (6.8s to synthesize 7.2s audio for 118 chars) |
-| `subtalker_do_sample: false` | ✅ Applied — no measurable speedup (bottleneck is forward pass, not sampling) |
-| `repetition_penalty: 1.0` | ✅ Applied — negligible speedup (penalty calc was already fast) |
-| `max_new_tokens` dynamic | ✅ Applied — adaptive output length, prevents 42s max for short texts |
-| FX overhead | ✅ Measured at 2-3ms — negligible (<0.04% of total) |
-| jarvis-rs git | `serve.rs` is **untracked**; `Cargo.toml`, `tts.rs`, `main.rs`, `dsp.rs`, `fx_config.rs` have **unstaged changes** |
-| `--dtype f16` | Model loads but inference fails — not retested with optimizations |
+| Daemon | ✅ Running, socket at `/tmp/jarvis.sock` |
+| HTTP health endpoint | ✅ `curl --unix-socket /tmp/jarvis.sock http://localhost/health` → `{"status":"ok"}` |
+| Error responses | ✅ Invalid JSON / inference failures return `{"error":"..."}` instead of hanging |
+| Loading progress | ✅ Reports every 5s, stops when model loaded (AtomicBool) |
+| BF16 default | ✅ Default dtype, no opt-in needed |
+| Audio playback | ✅ `paplay` via WSLg PulseAudio; fallback to `ffplay` if unavailable |
+| Playback timeout | ✅ `_wait_playback()` kills player after 20s to prevent hangs |
+| Release binary | ✅ Installed to `~/fuche-coder/jarvis-rs` — no dep on rust-ai/ |
+| Inference speed | **~1x real-time** in BF16 (~7-17 chars/s) |
+
+---
 
 **PERF measurements collected (live daemon):**
 
@@ -168,46 +169,50 @@ Uncommitted changes:
 ## Files Changed
 
 | File | Lines | Purpose |
-|---|---|---|---|
-| `~/fuche-coder/tts.py` | ~95 | Daemon try/fallback + `--daemon` flag |
-| `~/projects/rust-ai/jarvis-rs/src/serve.rs` | ~168 | **New** — Unix socket daemon + PERF instrumentation |
-| `~/projects/rust-ai/jarvis-rs/src/main.rs` | ~30 | `Serve` subcommand + flash-attn cleanup |
-| `~/projects/rust-ai/jarvis-rs/src/tts.rs` | ~166 | Removed `use_flash_attn`; added `subtalker_do_sample:false`, `repetition_penalty:1.0`, dynamic `max_new_tokens`; **f32 pipeline**: `samples: Vec<f32>`, `to_s16le()`, `apply_fx()`, token-aware `max_new_tokens` |
-| `~/projects/rust-ai/jarvis-rs/src/repl.rs` | ~3 | Removed `use_flash_attn` param; updated to `play_f32()` |
-| `~/projects/rust-ai/jarvis-rs/src/dsp.rs` | ~58 | **New** — `BassBoost` biquad low-shelf filter; `FxProcessor::process(&mut [f32])` |
-| `~/projects/rust-ai/jarvis-rs/src/fx_config.rs` | ~90 | `BassBoostParams`, `bassy_preset()`, JARVIS preset tuning |
-| `~/projects/rust-ai/jarvis-rs/src/audio.rs` | ~55 | Added `play_f32()` for native f32 playback; refactored `play_inner()` |
-| `~/projects/rust-ai/jarvis-rs/src/serve.rs` | ~170 | **New** — Unix socket daemon + PERF instrumentation; f32 pipeline; warm-up on startup |
-| `~/projects/rust-ai/jarvis-rs/src/main.rs` | ~30 | `Serve` subcommand + flash-attn cleanup; f32 pipeline: `apply_fx`, `to_s16le`, `play_f32` |
-| `~/projects/rust-ai/qwen_tts_patched/src/model/generate.rs` | ~3 | Streaming callback: `Vec<i16>` → `Vec<f32>` |
-| `~/projects/rust-ai/jarvis-rs/Cargo.toml` | 2 | +serde_json, -flash-attn |
+|---|---|---|
+| `~/fuche-coder/tts.py` | ~170 | Daemon try/fallback, `--daemon` flag, auto-detect player (paplay/ffplay), 20s playback timeout, BF16, binary in fuche-coder/ |
+| `~/fuche-coder/fuche` | 24 | Auto-start daemon from `~/fuche-coder/jarvis-rs` |
+| `~/fuche-coder/api.py` | ~3 | Updated binary path to `~/fuche-coder/jarvis-rs` |
+| `~/projects/rust-ai/jarvis-rs/src/serve.rs` | ~240 | Daemon + HTTP health endpoint + error responses + AtomicBool loading stop + SIGINT/SIGTERM handler |
+| `~/projects/rust-ai/jarvis-rs/src/main.rs` | ~120 | BF16 default, `Serve` subcommand, removed flash-attn/f16 |
+| `~/projects/rust-ai/jarvis-rs/src/tts.rs` | ~166 | f32 pipeline, token-aware max_tokens, style_to_instruct |
+| `~/projects/rust-ai/jarvis-rs/src/dsp.rs` | ~58 | BassBoost, FxProcessor::process(&mut [f32]) |
+| `~/projects/rust-ai/jarvis-rs/src/fx_config.rs` | ~90 | BassBoostParams, bassy preset, JARVIS tuning |
+| `~/projects/rust-ai/jarvis-rs/src/audio.rs` | ~55 | play_f32(), shared play_inner() |
+| `~/projects/rust-ai/jarvis-rs/src/repl.rs` | ~3 | dtype param, play_f32() |
+| `~/projects/rust-ai/jarvis-rs/Cargo.toml` | ~2 | +serde_json, +libc, -ctrlc, -flash-attn |
+| `~/projects/rust-ai/qwen_tts_patched/src/model/generate.rs` | ~3 | Streaming callback Vec<f32> |
+
+---
 
 ---
 
 ## Git
 
-**fuche-coder:**
+**fuche-coder (pushed to origin/master):**
 ```
+e432dcc  tts.py: add 30s timeout to paplay to prevent hanging
+85f6bcc  Update SESSION.md: BF16 benchmark results, libc signal handler docs
+0a89319  Update SESSION.md: daemon + f32 + max_tokens docs
 a531e91  Add SESSION.md — full session documentation
 a2598e5  Zyphra Cloud TTS: streaming playback + secure key mgmt
 3c5f89f  Default to --fast + --chunk-size 2 (--no-fast to opt out)
 cca2eb7  Thread --fast, --chunk-size, --dtype through fuche tts wrapper
 ```
 
-**jarvis-rs:**
+**jarvis-rs (local only, no remote):**
 ```
+77cfcba  Default dtype is now BF16; daemon sends error response instead of hanging
+1e058bf  Replace ctrlc with libc SIGINT+SIGTERM handler, remove ctrlc dep
 d42104f  Add --fast, --chunk-size, --dtype CLI flags + FP16 toggle
 ```
-No remote configured on jarvis-rs.
-
-**Uncommitted:** `serve.rs` (untracked), `tts.rs`/`main.rs`/`audio.rs`/`Cargo.toml` (modified for serve+opts), `dsp.rs`/`fx_config.rs` (modified for BassBoost + preset tuning + f32 pipeline), `qwen_tts_patched/src/model/generate.rs` (streaming callback f32).
 
 ---
 
 ## CLI Cheatsheet
 
 ```bash
-fuche tts "text"                              # calm + flanger,reverb + fast (daemon if running)
+fuche tts "text"                              # BF16 + calm + flanger,reverb + fast (daemon if running)
 fuche tts "text" --no-fast                    # disable greedy (full quality)
 fuche tts "text" --chunk-size 8               # larger chunks (higher latency)
 fuche tts "text" --style news --fx none       # override everything
@@ -215,6 +220,9 @@ fuche tts "text" --preset jarvis              # full JARVIS FX preset
 fuche tts "text" --voice vivian               # switch voice
 fuche tts "text" --instruct "Speak like Yoda" # custom instruct
 fuche tts --daemon                            # start daemon (blocking)
+
+# Health check (daemon must be running)
+curl --unix-socket /tmp/jarvis.sock http://localhost/health
 ```
 
 ---
@@ -261,24 +269,7 @@ Moved duplicated `style_to_instruct` from `main.rs` and `serve.rs` into `tts.rs`
 Replaced per-client `std::thread::spawn` with 4 pre-spawned worker threads using `mpsc` channel. No `threadpool` dependency needed.
 
 ### G. Graceful daemon shutdown (P7)
-Added `ctrlc` signal handler to clean up `/tmp/jarvis.sock` on Ctrl+C.
-
-### H. BF16 half-precision support (P8)
-Removed dead `--dtype f16` flag (F16 5-bit exponent overflows on attention scores → garbage/BF16 is stable). Added clean `--dtype bf16` → `DType::BF16` through `RunArgs`, `ServeArgs`, `ReplArgs`, and `tts.py`.
-
-| File | Change |
-|------|--------|
-| `jarvis-rs/src/main.rs` | `--dtype bf16` arg; removed f16; maps to `DType::BF16` |
-| `jarvis-rs/src/serve.rs` | `RunArgs.dtype: DType` |
-| `jarvis-rs/src/repl.rs` | `dtype` parameter on ReplArgs |
-| `fuche-coder/tts.py` | `--dtype bf16` flag passed as `--dtype bf16` to subprocess/daemon |
-
-**Status: VERIFIED** — BF16 loads correctly, generates identical output to F32 (same sample count for same prompt).
-
-**F16 removed entirely** — no remapping, no dead code.
-
-### I. libc signal handler (SIGINT+SIGTERM)
-Replaced `ctrlc` crate (SIGINT only) with `libc::signal()` for both `SIGINT` and `SIGTERM`. Uses `OnceLock<String>` for socket path (no mutable globals). Removes `ctrlc` dependency from `Cargo.toml`.
+Added `libc::signal()` handler to clean up `/tmp/jarvis.sock` on SIGINT or SIGTERM (replaces `ctrlc` crate which only handled SIGINT).
 
 | File | Change |
 |------|--------|
@@ -286,6 +277,34 @@ Replaced `ctrlc` crate (SIGINT only) with `libc::signal()` for both `SIGINT` and
 | `jarvis-rs/src/serve.rs` | `libc::signal()` handles SIGINT+SIGTERM → socket cleanup |
 
 **Socket cleanup verified** — `killall jarvis-rs` removes `/tmp/jarvis.sock`.
+
+### H. BF16 half-precision support + default (P8)
+Removed dead `--dtype f16` flag (F16 5-bit exponent overflows on attention scores → garbage). Added clean `--dtype bf16` → `DType::BF16`. **BF16 is now the default dtype** — no opt-in needed.
+
+| File | Change |
+|------|--------|
+| `jarvis-rs/src/main.rs` | `default_value = "bf16"`; removed f16 |
+| `jarvis-rs/src/serve.rs` | `RunArgs.dtype: DType` |
+| `jarvis-rs/src/repl.rs` | `dtype` parameter on ReplArgs |
+| `fuche-coder/tts.py` | `--dtype bf16` flag passed as `--dtype bf16` to subprocess/daemon |
+
+**Status: VERIFIED** — BF16 generates identical output to F32, ~1.34x speedup, 27% less CPU time.
+
+### I. HTTP health endpoint + error responses (serve.rs)
+Added HTTP protocol detection in `handle_client()`: if request line starts with `GET`/`POST`/`PUT`/`DELETE`, routes to `handle_http()` which drains HTTP headers and responds with JSON. Routes `/`, `/health`, `/healthz` return `{"status":"ok"}`.
+
+**Silent error bug fixed:** Invalid JSON, inference failures, and other errors now return `{"sample_rate":0,"error":"..."}` to the client instead of hanging forever.
+
+### J. Playback reliability (tts.py)
+- `_wait_playback()` — kills the audio player after 20s if it hangs
+- `_player_cmd(rate)` — auto-detects PulseAudio via `pactl info`; uses `paplay` if available, falls back to `ffplay` otherwise
+- Prevents indefinite hangs when PulseAudio is unavailable
+
+### K. Self-contained release binary
+- Release binary copied to `~/fuche-coder/jarvis-rs` (33MB)
+- `tts.py` updated to use local binary; model path still references original
+- `fuche` wrapper auto-starts daemon from `~/fuche-coder/jarvis-rs`
+- Works from any directory — no dependency on `~/projects/rust-ai/jarvis-rs/` for the binary
 
 ---
 
