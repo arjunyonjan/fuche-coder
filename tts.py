@@ -20,9 +20,9 @@ parser.add_argument("--voice", default=VOICE, help="Voice name")
 parser.add_argument("--style", default="calm",
                     choices=["conversational", "news", "storytelling", "cheerful", "calm"],
                     help="Expression style preset")
-parser.add_argument("--fast", action="store_true",
-                    help="Greedy decoding (faster, lower quality)")
-parser.add_argument("--chunk-size", type=int, default=8,
+parser.add_argument("--no-fast", action="store_true",
+                    help="Disable greedy decoding (slower, higher quality)")
+parser.add_argument("--chunk-size", type=int, default=2,
                     help="Stream chunk size (lower = lower latency)")
 parser.add_argument("--dtype", default="f32", choices=["f32", "f16"],
                     help="Model precision (f16 needs AC power)")
@@ -41,10 +41,9 @@ if args.preset:
     cmd += ["--preset", args.preset]
 elif args.fx:
     cmd += ["--fx", args.fx]
-if args.fast:
+if not args.no_fast:
     cmd += ["--fast"]
-if args.chunk_size != 8:
-    cmd += ["--chunk-size", str(args.chunk_size)]
+cmd += ["--chunk-size", str(args.chunk_size)]
 if args.dtype != "f32":
     cmd += ["--dtype", args.dtype]
 if args.instruct:
