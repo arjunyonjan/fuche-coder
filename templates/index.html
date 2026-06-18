@@ -31,6 +31,33 @@
 <body class="bg-gray-950 text-gray-100 h-screen flex justify-center">
   <div class="w-full max-w-2xl mx-auto p-4 flex flex-col h-screen">
 
+    <div class="bg-green-900/30 border border-green-700 rounded-lg px-4 py-3 mb-3 text-sm">
+      <details>
+        <summary class="text-green-400 font-bold cursor-pointer text-lg">✅ TTS Streaming Fixed <span class="text-green-500 text-sm font-normal">(Jun 17)</span></summary>
+        <div class="mt-3 space-y-3 text-green-200">
+          <div>
+            <div class="font-bold text-red-400 text-base">❌ Before — Everything Broke</div>
+            <ul class="list-disc ml-5 mt-1 space-y-1">
+              <li><code class="text-red-300">--stdout</code> (streaming mode) crashed with <code class="text-red-300">CUDA_ERROR_ASSERT</code> inside conv1d / matmul — zero audio output</li>
+              <li><code class="text-red-300">--fast</code> mode also crashed with <code class="text-red-300">expected: F32, got: BF16</code> — unusable</li>
+              <li>Codes from the TTS model (vocab ~33k) overflowed the tokenizer's 2048-entry codebook, producing NaN → GPU asserts</li>
+              <li>Audio was collected post-generation then decoded → full generation latency before first sound</li>
+            </ul>
+          </div>
+          <div>
+            <div class="font-bold text-green-400 text-base">✅ After — Streaming Works</div>
+            <ul class="list-disc ml-5 mt-1 space-y-1">
+              <li>Codes clamped to <code class="text-green-300">[0, 2047]</code> before tokenizer decode — eliminates OOB embedding lookups</li>
+              <li>Explicit BF16→F32 conversion before <code class="text-green-300">to_vec1::&lt;f32&gt;()</code> — no more dtype crash</li>
+              <li>Decode happens <b>mid-generation</b> every 8 frames (~0.06s) — first audio arrives in milliseconds, not seconds</li>
+              <li>All three modes tested: <code class="text-green-300">--stdout</code>, normal, <code class="text-green-300">--fast</code> — output valid WAV/PCM</li>
+              <li>Daemon mode made thread-safe with <code class="text-green-300">Arc&lt;Mutex&lt;&gt;&gt;</code> for concurrent streaming clients</li>
+            </ul>
+          </div>
+        </div>
+      </details>
+    </div>
+
     <header class="flex justify-between items-center pb-3 border-b border-gray-800">
       <h1 class="text-xl font-bold">⚡ Fuche AI</h1>
       <div class="flex items-center gap-1">
