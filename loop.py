@@ -53,38 +53,10 @@ def search(query):
     except Exception as e:
         return f"Search failed: {e}"
 
-def self_heal(question, max_loops=3, verbose=True):
-    keywords = extract_keywords(question) or question
-    best_quality = 0.0
-    best_result = ""
-    out = sys.stderr if not verbose else sys.stdout
-    for loop in range(1, max_loops + 1):
-        print(f"Loop {loop}: Searching with '{keywords}'", file=out)
-        result = search(keywords)
-        quality = quality_check(result, question)
-        print(f"Quality: {quality:.2f}", file=out)
-
-        if quality > best_quality:
-            best_quality = quality
-            best_result = result
-
-        if quality >= 0.7:
-            print("✅ Good result", file=out)
-            return result
-
-        if loop < max_loops:
-            keywords = refine_keywords(question, keywords, quality)
-            if quality < 0.3:
-                keywords = question
-            print(f"Refined keywords: {keywords}", file=out)
-            time.sleep(1)
-
-    print("⚠️ Max loops reached, returning best result", file=out)
-    return best_result
-
 if __name__ == "__main__":
     q = " ".join(sys.argv[1:]).strip().rstrip(".,!?;:")
     if not q:
         print("Usage: python loop.py 'your question'")
         sys.exit(1)
+    from main import self_heal
     print(self_heal(q))

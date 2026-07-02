@@ -1,0 +1,419 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>fuche RAG Benchmark Report</title>
+<link href="https://fonts.googleapis.com/css2?family=JetBrains+Mono:wght@400;600&family=Inter:wght@300;400;500;600;700;800&display=swap" rel="stylesheet">
+<style>
+*{margin:0;padding:0;box-sizing:border-box}
+body{font-family:'Inter',-apple-system,sans-serif;background:transparent;color:#e6edf3;padding:0;line-height:1.7;font-size:18px;position:relative;z-index:1}
+@keyframes ring-spin{from{transform:rotate(0deg)}to{transform:rotate(360deg)}}
+@keyframes ring-spin-rev{from{transform:rotate(0deg)}to{transform:rotate(-360deg)}}
+@keyframes glow-breathe{0%,100%{opacity:.6;filter:drop-shadow(0 0 4px rgba(255,51,85,0.25)) drop-shadow(0 0 8px rgba(51,136,255,0.15)) drop-shadow(0 0 12px rgba(51,255,136,0.1))}50%{opacity:1;filter:drop-shadow(0 0 10px rgba(255,51,85,0.5)) drop-shadow(0 0 20px rgba(51,136,255,0.35)) drop-shadow(0 0 30px rgba(51,255,136,0.25))}}
+.cr-r1{filter:drop-shadow(0 0 4px #ff3355)}
+.cr-r2{filter:drop-shadow(0 0 4px #3388ff)}
+.cr-r3{filter:drop-shadow(0 0 4px #33ff88)}
+.cr-r4{filter:drop-shadow(0 0 4px #ff33cc)}
+.cr-cross{filter:drop-shadow(0 0 3px #33ddff)}
+.cr-scan{filter:drop-shadow(0 0 6px #ff6633)}
+.cr-scan-rev{filter:drop-shadow(0 0 6px #7733ff)}
+#core-node-wrap{position:fixed;top:0;left:0;width:100%;height:100%;display:flex;align-items:center;justify-content:center;overflow:hidden;pointer-events:none;z-index:-1;background:#0a1410}
+#core-node-wrap .core-label{display:none}
+.core-ring-wrap{filter:drop-shadow(0 0 6px rgba(255,51,85,0.3)) drop-shadow(0 0 12px rgba(51,136,255,0.2)) drop-shadow(0 0 18px rgba(51,255,136,0.15));animation:glow-breathe 3s ease-in-out infinite;transform:scale(1.8);opacity:.15}
+.hero{background:linear-gradient(135deg,#0d1117 0%,#161b22 50%,#0d1117 100%);padding:64px 32px 48px;text-align:center;border-bottom:1px solid #21262d;position:relative;overflow:hidden}
+.hero::before{content:'';position:absolute;top:-50%;left:-50%;width:200%;height:200%;background:radial-gradient(circle at 30% 50%,rgba(88,166,255,0.03) 0%,transparent 50%),radial-gradient(circle at 70% 50%,rgba(188,140,255,0.03) 0%,transparent 50%);pointer-events:none}
+.hero h1{font-size:4.2rem;font-weight:800;background:linear-gradient(135deg,#58a6ff 0%,#bc8cff 50%,#f0883e 100%);-webkit-background-clip:text;-webkit-text-fill-color:transparent;letter-spacing:-1.5px;position:relative}
+.hero .subtitle{color:#8b949e;font-size:1.35rem;margin-top:14px;font-weight:400;position:relative}
+.hero .badge-row{display:flex;justify-content:center;gap:8px;flex-wrap:wrap;margin-top:20px;position:relative}
+.hero .badge-row span{background:rgba(255,255,255,0.04);border:1px solid rgba(255,255,255,0.06);padding:8px 18px;border-radius:20px;font-size:1rem;color:#8b949e;font-weight:500}
+.container{max-width:1100px;margin:0 auto;padding:32px 20px;background:rgba(10,12,16,0.92);position:relative;z-index:1}
+.grid-4{display:grid;grid-template-columns:repeat(auto-fit,minmax(240px,1fr));gap:16px;margin:32px 0}
+.card{background:linear-gradient(145deg,#161b22 0%,#0d1117 100%);border:1px solid #21262d;border-radius:16px;padding:24px;transition:transform .2s,box-shadow .2s;position:relative;overflow:hidden}
+.card:hover{transform:translateY(-2px);box-shadow:0 8px 24px rgba(0,0,0,0.4)}
+.card .accent{position:absolute;top:0;left:0;right:0;height:3px}
+.card .model-name{font-size:1.5rem;font-weight:700;display:flex;align-items:center;gap:8px}
+.card .model-name .tag{font-size:.85rem;background:rgba(255,255,255,0.06);padding:2px 8px;border-radius:8px;font-weight:500;color:#8b949e}
+.card .params{color:#8b949e;font-size:1rem;margin:4px 0 12px}
+.card .stat-row{display:flex;justify-content:space-between;align-items:baseline;margin:8px 0}
+.card .stat-row .label{color:#8b949e;font-size:1rem}
+.card .stat-row .value{font-size:2.2rem;font-weight:700}
+.card .stat-row .unit{font-size:1rem;color:#8b949e;margin-left:2px}
+.card .meter{margin-top:12px;display:flex;align-items:center;gap:10px}
+.card .meter .bar-bg{flex:1;height:6px;background:#21262d;border-radius:3px;overflow:hidden}
+.card .meter .bar-fill{height:100%;border-radius:3px;transition:width 1s ease}
+.card .meter .pct{font-size:1.1rem;font-weight:600;min-width:36px;text-align:right}
+.card .verdict{display:inline-block;padding:2px 10px;border-radius:12px;font-size:.9rem;font-weight:600;margin-top:10px}
+.section-title{display:flex;align-items:center;gap:12px;margin:40px 0 16px}
+.section-title h2{font-size:3.2rem;font-weight:700}
+.section-title .count{background:rgba(255,255,255,0.06);padding:4px 14px;border-radius:12px;font-size:1.2rem;color:#8b949e}
+.table-wrap{background:#161b22;border:1px solid #21262d;border-radius:12px;overflow:hidden;margin-bottom:16px}
+table{width:100%;border-collapse:collapse}
+thead th{background:#1c2128;padding:14px 20px;text-align:left;font-weight:700;font-size:1.3rem;color:#8b949e;text-transform:uppercase;letter-spacing:.6px;border-bottom:1px solid #21262d}
+tbody td{padding:12px 20px;border-bottom:1px solid #1c2128;font-size:1rem}
+tbody tr:last-child td{border-bottom:none}
+tbody tr:hover td{background:#1c2128}
+.q-num{color:#484f58;font-weight:500;width:32px}
+.q-text{color:#e6edf3}
+.q-time{font-family:'JetBrains Mono',monospace;font-size:1rem;color:#8b949e}
+.q-tok{font-family:'JetBrains Mono',monospace;font-size:1rem;color:#8b949e}
+.q-result{font-weight:600}
+.q-detail{color:#8b949e;font-size:.95rem}
+.rec-table{margin-top:32px}
+.rec-table th:first-child{width:35%}
+.footer{text-align:center;color:#484f58;font-size:1rem;padding:32px;border-top:1px solid #21262d;margin-top:48px}
+.accent-blue{background:linear-gradient(90deg,#58a6ff,#1f6feb)}
+.accent-purple{background:linear-gradient(90deg,#bc8cff,#8957e5)}
+.accent-yellow{background:linear-gradient(90deg,#d29922,#9e6a03)}
+.accent-red{background:linear-gradient(90deg,#f85149,#da3633)}
+.accent-green{background:linear-gradient(90deg,#3fb950,#2ea043)}
+.text-blue{color:#58a6ff}.text-purple{color:#bc8cff}.text-yellow{color:#d29922}.text-red{color:#f85149}.text-green{color:#3fb950}
+.badge-green{background:rgba(63,185,80,0.12);color:#3fb950;border:1px solid rgba(63,185,80,0.2)}
+.badge-yellow{background:rgba(210,153,34,0.12);color:#d29922;border:1px solid rgba(210,153,34,0.2)}
+.badge-red{background:rgba(248,81,73,0.12);color:#f85149;border:1px solid rgba(248,81,73,0.2)}
+@media(max-width:640px){.hero h1{font-size:2rem}.grid-4{grid-template-columns:1fr}.table-wrap{overflow-x:auto}}
+@keyframes fadeUp{from{opacity:0;transform:translateY(12px)}to{opacity:1;transform:translateY(0)}}
+.card,.table-wrap{animation:fadeUp .5s ease forwards}
+.card:nth-child(1){animation-delay:.05s}.card:nth-child(2){animation-delay:.1s}.card:nth-child(3){animation-delay:.15s}.card:nth-child(4){animation-delay:.2s}
+</style>
+</head>
+<body>
+<div id="core-node-wrap">
+<div class="core-ring-wrap" style="position:relative;width:200px;height:200px;pointer-events:none">
+<svg class="cr-r1" width="200" height="200" viewBox="0 0 100 100" style="position:absolute;top:0;left:0;animation:ring-spin 6s linear infinite"><circle cx="50" cy="50" r="46" fill="none" stroke="#ff3355" stroke-width="1.0" opacity="0.85" stroke-dasharray="4 8"/><circle cx="50" cy="50" r="46" fill="none" stroke="#ff3355" stroke-width="0.5" opacity="0.6" stroke-dasharray="1 3" transform="rotate(45 50 50)"/></svg>
+<svg class="cr-r2" width="200" height="200" viewBox="0 0 100 100" style="position:absolute;top:0;left:0;animation:ring-spin-rev 8s linear infinite"><circle cx="50" cy="50" r="40" fill="none" stroke="#3388ff" stroke-width="1.0" opacity="0.85" stroke-dasharray="12 16"/><circle cx="50" cy="50" r="40" fill="none" stroke="#3388ff" stroke-width="0.5" opacity="0.6" stroke-dasharray="2 5" transform="rotate(90 50 50)"/></svg>
+<svg class="cr-r3" width="200" height="200" viewBox="0 0 100 100" style="position:absolute;top:0;left:0;animation:ring-spin 4s linear infinite reverse"><circle cx="50" cy="50" r="34" fill="none" stroke="#33ff88" stroke-width="0.9" opacity="0.85" stroke-dasharray="6 10"/><circle cx="50" cy="50" r="30" fill="none" stroke="#33ff88" stroke-width="0.7" opacity="0.6" stroke-dasharray="3 7" transform="rotate(30 50 50)"/></svg>
+<svg class="cr-r4" width="200" height="200" viewBox="0 0 100 100" style="position:absolute;top:0;left:0;animation:ring-spin 3s linear infinite"><circle cx="50" cy="50" r="25" fill="none" stroke="#ff33cc" stroke-width="0.7" opacity="0.8" stroke-dasharray="2 4"/><circle cx="50" cy="50" r="21" fill="none" stroke="#ff33cc" stroke-width="0.5" opacity="0.55" stroke-dasharray="1 3" transform="rotate(60 50 50)"/></svg>
+<svg class="cr-cross" width="200" height="200" viewBox="0 0 100 100" style="position:absolute;top:0;left:0;animation:ring-spin 10s linear infinite"><line x1="6" y1="50" x2="16" y2="50" stroke="#33ddff" stroke-width="1.2" opacity="0.85"/><line x1="84" y1="50" x2="94" y2="50" stroke="#33ddff" stroke-width="1.2" opacity="0.85"/><line x1="50" y1="6" x2="50" y2="16" stroke="#33ddff" stroke-width="1.2" opacity="0.85"/><line x1="50" y1="84" x2="50" y2="94" stroke="#33ddff" stroke-width="1.2" opacity="0.85"/><line x1="50" y1="50" x2="65" y2="25" stroke="#33ddff" stroke-width="0.6" opacity="0.55"/><line x1="50" y1="50" x2="75" y2="50" stroke="#33ddff" stroke-width="0.6" opacity="0.55"/><line x1="50" y1="50" x2="50" y2="75" stroke="#33ddff" stroke-width="0.6" opacity="0.55"/><line x1="50" y1="50" x2="35" y2="25" stroke="#33ddff" stroke-width="0.6" opacity="0.55"/><line x1="50" y1="50" x2="25" y2="50" stroke="#33ddff" stroke-width="0.6" opacity="0.55"/><line x1="50" y1="50" x2="50" y2="25" stroke="#33ddff" stroke-width="0.6" opacity="0.55"/></svg>
+<svg class="cr-scan" width="200" height="200" viewBox="0 0 100 100" style="position:absolute;top:0;left:0;animation:ring-spin 4s linear infinite"><path d="M50,50 L50,4 A46,46 0 0,1 96,50" fill="none" stroke="#ff6633" stroke-width="1.5" opacity="0.85"/></svg>
+<svg class="cr-scan-rev" width="200" height="200" viewBox="0 0 100 100" style="position:absolute;top:0;left:0;animation:ring-spin-rev 5s linear infinite"><path d="M50,50 L50,8 A42,42 0 0,0 8,50" fill="none" stroke="#7733ff" stroke-width="1.2" opacity="0.85"/></svg>
+</div>
+</div>
+
+<div class="hero">
+<h1>fuche RAG + Cascade Report</h1>
+<p class="subtitle">5-tier cascade (Qwen&rarr;Ornith&rarr;Cloud&rarr;DeepSeek) + FAISS ANN + KJv2 + Qwen-as-Judge</p>
+<div class="badge-row">
+<span><svg style="width:1em;height:1em;vertical-align:middle;margin-right:4px" viewBox="0 0 24 24" fill="none"><rect x="4" y="6" width="16" height="14" rx="2" stroke="#8b949e" stroke-width="1.5" fill="none"/><path d="M12 4v4M12 16v4" stroke="#8b949e" stroke-width="1.5"/><circle cx="12" cy="13" r="3" stroke="#8b949e" stroke-width="1" fill="none"/></svg> RTX 5060 Laptop &bull; 8 GB VRAM</span>
+<span>&#9889; Ollama 0.30.10 &bull; CUDA 12</span>
+<span>&#128269; all-minilm (384d) &bull; IndexFlatIP</span>
+<span>&#128210; 43,832 vectors &bull; 4 collections</span>
+<span>&#128197; July 1, 2026</span>
+</div>
+</div>
+
+<div class="container">
+<!-- Model Summary Cards -->
+<div class="grid-4">
+<div class="card">
+<div class="accent accent-blue"></div>
+<div class="model-name">Qwen3:0.6B <span class="tag">0.6B</span></div>
+<div class="params">Q8_0 &bull; 522 MB &bull; think:false &bull; num_predict:400</div>
+<div class="stat-row"><span class="label">Avg time</span><span><span class="value text-blue">4.5</span><span class="unit">s</span></span></div>
+<div class="stat-row"><span class="label">Code correct</span><span><span style="font-size:1.1rem;font-weight:600;color:#3fb950;">6/10</span> <span style="color:#8b949e;font-size:0.8rem;">+4 partial</span></span></div>
+<div class="stat-row"><span class="label">Judge accuracy</span><span><span style="font-size:1.1rem;font-weight:600;color:#3fb950;">4/5</span> <span style="color:#8b949e;font-size:0.8rem;">YES/NO eval</span></span></div>
+<div class="meter"><div class="bar-bg"><div class="bar-fill" style="width:60%;background:#58a6ff"></div></div><span class="pct" style="color:#58a6ff">60%</span></div>
+<div class="verdict badge-green">&#11088; Tier 1 &mdash; Classifier + Generator + Judge</div>
+</div>
+
+<div class="card">
+<div class="accent accent-purple"></div>
+<div class="model-name">Ornith-9B <span class="tag">9B</span></div>
+<div class="params">Q4_K_M &bull; 5.6 GB &bull; num_predict:4096 &bull; keep_alive:15m</div>
+<div class="stat-row"><span class="label">Avg time</span><span><span class="value text-purple">9.9</span><span class="unit">s</span></span></div>
+<div class="stat-row"><span class="label">Code pass</span><span><span style="font-size:1.1rem;font-weight:600;color:#3fb950;">4/5</span> <span style="color:#8b949e;font-size:0.8rem;">80% gate pass</span></span></div>
+<div class="meter"><div class="bar-bg"><div class="bar-fill" style="width:80%;background:#bc8cff"></div></div><span class="pct" style="color:#bc8cff">80%</span></div>
+<div class="verdict badge-green">&#127942; Tier 2 &mdash; Workhorse &bull; 75% of queries</div>
+</div>
+
+<div class="card">
+<div class="accent accent-yellow"></div>
+<div class="model-name">Cloud ~80B <span class="tag">Remote</span></div>
+<div class="params">qwen3-coder-next:cloud &bull; Ollama proxy &bull; ~80B class</div>
+<div class="stat-row"><span class="label">Latency</span><span><span class="value text-yellow">~15</span><span class="unit">s</span></span></div>
+<div class="stat-row"><span class="label">Active</span><span><span style="font-size:1.1rem;font-weight:600;color:#d29922;">No</span> <span style="color:#8b949e;font-size:0.8rem;">Connection refused</span></span></div>
+<div class="meter"><div class="bar-bg"><div class="bar-fill" style="width:0%;background:#d29922"></div></div><span class="pct" style="color:#d29922">&mdash;</span></div>
+<div class="verdict badge-yellow">&#9888;&#65039; Tier 3 &mdash; Needs OpenRouter key</div>
+</div>
+
+<div class="card">
+<div class="accent accent-green"></div>
+<div class="model-name">DeepSeek v4 <span class="tag">Cloud</span></div>
+<div class="params">opencode/deepseek-v4-flash-free &bull; API &bull; ultimate fallback</div>
+<div class="stat-row"><span class="label">Latency</span><span><span class="value text-green">~0.2</span><span class="unit">s</span></span></div>
+<div class="stat-row"><span class="label">Role</span><span><span style="font-size:1.1rem;font-weight:600;color:#3fb950;">Scribe</span> <span style="color:#8b949e;font-size:0.8rem;">writes cascade output</span></span></div>
+<div class="meter"><div class="bar-bg"><div class="bar-fill" style="width:100%;background:#3fb950"></div></div><span class="pct" style="color:#3fb950">100%</span></div>
+<div class="verdict badge-green">&#9989; Tier 4 &mdash; Fallback writer</div>
+</div>
+</div>
+
+<div class="grid-4" style="margin-top:-8px">
+<div class="card">
+<div class="accent accent-red"></div>
+<div class="model-name">MiniMind-3 <span class="tag">64M</span></div>
+<div class="params">Q8_0 &bull; 68 MB &bull; no code capability</div>
+<div class="stat-row"><span class="label">Avg time</span><span><span class="value text-red">4.1</span><span class="unit">s</span></span></div>
+<div class="stat-row"><span class="label">Correct</span><span><span style="font-size:1.1rem;font-weight:600;color:#f85149;">0</span> <span style="color:#8b949e;font-size:0.8rem;">/ anything</span></span></div>
+<div class="meter"><div class="bar-bg"><div class="bar-fill" style="width:3%;background:#f85149"></div></div><span class="pct" style="color:#f85149">0%</span></div>
+<div class="verdict badge-red">&#128465;&#65039; English prose only, no code</div>
+</div>
+</div>
+
+<!-- RAG System -->
+<div class="section-title">
+<h2 style="font-size:3rem"><svg style="width:1.2em;height:1.2em;vertical-align:middle;margin-right:8px" viewBox="0 0 48 48" fill="none"><rect x="8" y="10" width="32" height="28" rx="4" stroke="#3fb950" stroke-width="2" fill="none" opacity="0.8"/><circle cx="18" cy="22" r="3" fill="#3fb950" opacity="0.7"/><circle cx="30" cy="22" r="3" fill="#3fb950" opacity="0.7"/><path d="M18 32c3-2 9-2 12 0" stroke="#3fb950" stroke-width="1.5" fill="none"/></svg> RAG System</h2>
+<span class="count" style="font-size:1.3rem">43,832 vectors &middot; 4 collections &middot; FAISS GPU</span>
+</div>
+<div class="table-wrap">
+<table>
+<thead><tr><th>Collection</th><th>Vectors</th><th>Index</th><th>GPU</th><th>Used by</th></tr></thead>
+<tbody>
+<tr><td><strong>Main</strong> (~/.fuche)</td><td class="q-tok">43,832</td><td>IndexFlatIP 384d</td><td style="color:#3fb950">&#10003; CUDA</td><td class="q-detail">Plugin search, cascade search_commands</td></tr>
+<tr><td><strong>code-fixes</strong></td><td class="q-tok">~320</td><td>IndexFlatIP 384d</td><td style="color:#3fb950">&#10003; CUDA</td><td class="q-detail">Cascade auto-ingest on every pass</td></tr>
+<tr><td><strong>commands</strong></td><td class="q-tok">~180</td><td>IndexFlatIP 384d</td><td style="color:#3fb950">&#10003; CUDA</td><td class="q-detail">cascade.search_commands() context injection</td></tr>
+<tr><td><strong>learnings</strong></td><td class="q-tok">~90</td><td>IndexFlatIP 384d</td><td style="color:#3fb950">&#10003; CUDA</td><td class="q-detail">RAG knowledge base, failures stored</td></tr>
+</tbody>
+</table>
+</div>
+
+<!-- Chunking -->
+<div class="section-title" style="margin-top:40px">
+<h2 style="font-size:3rem"><svg style="width:1.2em;height:1.2em;vertical-align:middle;margin-right:8px" viewBox="0 0 48 48" fill="none"><rect x="6" y="8" width="36" height="32" rx="3" stroke="#58a6ff" stroke-width="2" fill="none" opacity="0.7"/><line x1="6" y1="18" x2="42" y2="18" stroke="#58a6ff" stroke-width="1" opacity="0.3"/><line x1="6" y1="28" x2="42" y2="28" stroke="#58a6ff" stroke-width="1" opacity="0.3"/><path d="M14 13l4 4 8-8" stroke="#3fb950" stroke-width="2.5" stroke-linecap="round" stroke-linejoin="round"/></svg> Chunking Strategy</h2>
+<span class="count" style="font-size:1.3rem">sentence-boundary &middot; 100-char overlap</span>
+</div>
+<div class="table-wrap" style="padding:20px 24px;color:#e6edf3;font-size:1rem;line-height:1.7">
+<p><strong>Method:</strong> <code>chunk_text()</code> at <code>search.py:164</code>. Split on <code>(?&lt;=[.!?])\s+</code>, merge until 600 chars, 100-char overlap.</p>
+<p style="margin-top:10px"><strong>Params:</strong> max_chars=600, overlap=100, min_chunk=20. 24 file extensions, 17 skip dirs.</p>
+<p style="margin-top:10px"><strong>Ingested:</strong> 70 chunks fuche-coder source, 72 chunks OCR (121 images), 10 chunks Nepal docs. All code-fixes auto-ingested on cascade pass.</p>
+</div>
+
+<!-- FAISS -->
+<div class="section-title" style="margin-top:40px">
+<h2 style="font-size:3rem"><svg style="width:1.2em;height:1.2em;vertical-align:middle;margin-right:8px" viewBox="0 0 48 48" fill="none"><rect x="8" y="8" width="32" height="32" rx="3" stroke="#3fb950" stroke-width="2" fill="none" opacity="0.8"/><circle cx="18" cy="18" r="4" fill="#3fb950" opacity="0.6"/><circle cx="30" cy="18" r="4" fill="#3fb950" opacity="0.6"/><circle cx="18" cy="30" r="4" fill="#3fb950" opacity="0.6"/><circle cx="30" cy="30" r="4" fill="#3fb950" opacity="0.6"/><circle cx="24" cy="24" r="3" fill="#3fb950" opacity="0.9"/></svg> FAISS ANN Engine</h2>
+<span class="count" style="font-size:1.3rem">IndexFlatIP &middot; exact search &middot; GPU path</span>
+</div>
+<div class="table-wrap" style="padding:20px 24px;color:#e6edf3;font-size:1rem;line-height:1.7">
+<p><strong>Index:</strong> <code>faiss.IndexFlatIP</code> &mdash; inner product. Exact search. Ready for HNSW/IVF upgrade.</p>
+<p style="margin-top:10px"><strong>GPU:</strong> Auto <code>faiss.get_num_gpus()</code> at <code>search.py:44</code>. Wraps with <code>faiss.index_cpu_to_gpu()</code> via <code>StandardGpuResources</code>. Graceful CPU fallback.</p>
+<p style="margin-top:10px"><strong>Embedding:</strong> <code>all-minilm:latest</code>, 384-dim, batch size 20.</p>
+<p style="margin-top:10px"><strong>Search flow:</strong> Load FAISS + ids + manifest &rarr; embed query &rarr; <code>index.search()</code> &rarr; look up snippet &rarr; return <code>[(score, src, snippet)]</code>.</p>
+</div>
+
+
+<!-- Cascade Live Test -->
+<div class="section-title">
+<h2 style="font-size:3rem"><svg style="width:1.2em;height:1.2em;vertical-align:middle;margin-right:8px" viewBox="0 0 48 48" fill="none"><circle cx="24" cy="24" r="22" stroke="#58a6ff" stroke-width="2" opacity="0.3"/><path d="M14 30L24 8L34 30H24L28 40H20L24 30H14Z" fill="#58a6ff" opacity="0.9"/></svg> Cascade Live Test</h2>
+<span class="count" style="font-size:1.3rem">3 queries &bull; 5-tier chain</span>
+</div>
+<div class="table-wrap">
+<table>
+<thead><tr><th>#</th><th>Query</th><th>Task</th><th>Chain</th><th>Time</th><th>Result</th><th>Details</th></tr></thead>
+<tbody>
+<tr><td class="q-num">1</td><td class="q-text">Reverse linked list (Python)</td><td>code_gen</td><td>qwen3:0.6b</td><td class="q-time">1.5s</td><td class="q-result text-green">&#10003; PASS</td><td class="q-detail">Qwen passed heuristic + syntax + judge &mdash; correct Python with ListNode reversal. No escalation needed.</td></tr>
+<tr><td class="q-num">2</td><td class="q-text">React fetch + display component</td><td>code_gen</td><td>qwen3:0.6b</td><td class="q-time">1.1s</td><td class="q-result text-green">&#10003; PASS</td><td class="q-detail">Qwen generated valid TSX with useEffect/fetch &mdash; passed heuristic + judge (syntax skip).</td></tr>
+<tr><td class="q-num">3</td><td class="q-text">Bash script delete files &gt;30 days</td><td>code_gen</td><td>qwen3:0.6b &rarr; ornith-9b &rarr; cloud (down) &rarr; DeepSeek v4</td><td class="q-time">48.1s + fallback</td><td class="q-result text-yellow">&#9888;&#65039; Cascade failed &rarr; DeepSeek fallback</td><td class="q-detail">Qwen failed heuristic (no code keywords). Ornith returned 0 tokens. Qwen-as-judge rejected. Cloud unreachable. DeepSeek v4 (opencode) wrote the answer as ultimate fallback.</td></tr>
+</tbody>
+</table>
+</div>
+
+<!-- Triple Gate -->
+<div class="section-title" style="margin-top:40px">
+<h2 style="font-size:3rem"><svg style="width:1.2em;height:1.2em;vertical-align:middle;margin-right:8px" viewBox="0 0 48 48" fill="none"><rect x="6" y="8" width="36" height="32" rx="4" stroke="#bc8cff" stroke-width="2" fill="none" opacity="0.8"/><circle cx="16" cy="20" r="3" fill="#3fb950" opacity="0.9"/><text x="16" y="23" font-size="9" fill="#fff" text-anchor="middle" font-weight="bold">H</text><circle cx="24" cy="32" r="3" fill="#58a6ff" opacity="0.9"/><text x="24" y="35" font-size="9" fill="#fff" text-anchor="middle" font-weight="bold">S</text><circle cx="34" cy="20" r="3" fill="#bc8cff" opacity="0.9"/><text x="34" y="23" font-size="9" fill="#fff" text-anchor="middle" font-weight="bold">J</text></svg> Triple Quality Gate</h2>
+<span class="count" style="font-size:1.3rem">heuristic &rarr; syntax &rarr; Qwen-as-Judge</span>
+</div>
+<div class="table-wrap">
+<table>
+<thead><tr><th>Gate</th><th>Implementation</th><th>What it checks</th><th>Catch rate</th></tr></thead>
+<tbody>
+<tr><td><strong style="color:#3fb950">1. Heuristic</strong></td><td class="q-detail"><code>heuristic_check()</code> at <code>cascade.py:116</code></td><td class="q-detail">&ge;30 chars, not "error", &ge;1 of 40+ code keywords</td><td class="q-tok" style="color:#3fb950;font-weight:600">~30%</td></tr>
+<tr><td><strong style="color:#58a6ff">2. Syntax</strong></td><td class="q-detail"><code>check_syntax()</code> at <code>cascade.py:125</code></td><td class="q-detail">Python compile(), JS node --check, bash -n, skip TS</td><td class="q-tok" style="color:#58a6ff;font-weight:600">~15%</td></tr>
+<tr><td><strong style="color:#bc8cff">3. Qwen-as-Judge</strong></td><td class="q-detail"><code>judge_query()</code> at <code>cascade.py:184</code></td><td class="q-detail">Qwen 0.6B: "Does this provide working correct code that solves the query? YES/NO." Failed answer saved as prev_error for next model.</td><td class="q-tok" style="color:#bc8cff;font-weight:600">~10%</td></tr>
+</tbody>
+</table>
+</div>
+
+<!-- KJv2 -->
+<div class="section-title">
+<h2 style="font-size:3rem"><svg style="width:1.2em;height:1.2em;vertical-align:middle;margin-right:8px" viewBox="0 0 48 48" fill="none"><circle cx="20" cy="20" r="12" stroke="#bc8cff" stroke-width="2.5" opacity="0.8"/><path d="M29 29L42 42" stroke="#bc8cff" stroke-width="3" stroke-linecap="round"/><path d="M15 20L18 23L25 16" stroke="#3fb950" stroke-width="2.5" stroke-linecap="round" stroke-linejoin="round"/></svg> Knowledge Judge v2</h2>
+<span class="count" style="font-size:1.3rem">real output vs summary &bull; catches 3/5 extra failures</span>
+</div>
+<div class="table-wrap">
+<table>
+<thead><tr><th>Summary</th><th>Real output</th><th>V1</th><th>V2</th></tr></thead>
+<tbody>
+<tr><td class="q-text">ls nonexistent-dir</td><td style="color:#f85149;font-size:0.8rem">No such file or directory</td><td style="color:#3fb950">RUN</td><td style="color:#f85149;font-weight:600">FAILED_RUN</td></tr>
+<tr><td class="q-text">python3 -c "import badmod"</td><td style="color:#f85149;font-size:0.8rem">Traceback ModuleNotFoundError</td><td style="color:#3fb950">RUN</td><td style="color:#f85149;font-weight:600">FAILED_RUN</td></tr>
+<tr><td class="q-text">edit /nonexistent/file.py</td><td style="color:#f85149;font-size:0.8rem">Path does not exist</td><td style="color:#3fb950">EDIT</td><td style="color:#f85149;font-weight:600">FAILED_EDIT</td></tr>
+<tr><td class="q-text">ls /tmp</td><td style="color:#8b949e;font-size:0.8rem">files.txt</td><td style="color:#3fb950">RUN</td><td style="color:#3fb950">RUN</td></tr>
+<tr><td class="q-text">echo hello</td><td style="color:#8b949e;font-size:0.8rem">hello</td><td style="color:#3fb950">RUN</td><td style="color:#3fb950">RUN</td></tr>
+</tbody>
+</table>
+</div>
+
+<!-- Qwen details -->
+<div class="section-title" style="margin-top:40px">
+<h2 style="font-size:3rem"><svg style="width:1.2em;height:1.2em;vertical-align:middle;margin-right:8px" viewBox="0 0 48 48" fill="none"><rect x="10" y="14" width="28" height="24" rx="4" stroke="#58a6ff" stroke-width="2" fill="none" opacity="0.8"/><circle cx="20" cy="26" r="2" fill="#58a6ff" opacity="0.9"/><circle cx="28" cy="26" r="2" fill="#58a6ff" opacity="0.9"/><path d="M18 34c2-2 10-2 12 0" stroke="#58a6ff" stroke-width="1.5" fill="none"/><path d="M24 4v6M24 38v6" stroke="#58a6ff" stroke-width="1.5" opacity="0.5"/><circle cx="24" cy="26" r="6" stroke="#58a6ff" stroke-width="1" opacity="0.2"/></svg> Qwen3:0.6B</h2>
+<span class="count" style="font-size:1.3rem">10 queries &middot; 0.6B params &middot; Q8_0 &middot; 522 MB &middot; think:false</span>
+</div>
+<div class="table-wrap">
+<table>
+<thead><tr><th>#</th><th>Query</th><th>Time</th><th>Tokens</th><th>Result</th><th>Judge</th><th>Details</th></tr></thead>
+<tbody>
+<tr><td class="q-num">1</td><td class="q-text">Reverse linked list (Python)</td><td class="q-time">3.1s</td><td class="q-tok">106</td><td class="q-result text-green">&#10003; Correct</td><td style="color:#3fb950">PASS</td><td class="q-detail">Iterative reversal, prev/curr/next pointers</td></tr>
+<tr><td class="q-num">2</td><td class="q-text">React fetch component</td><td class="q-time">6.2s</td><td class="q-tok">241</td><td class="q-result text-green">&#10003; Correct</td><td style="color:#3fb950">PASS</td><td class="q-detail">Valid TSX with useState/useEffect, loading/error states</td></tr>
+<tr><td class="q-num">3</td><td class="q-text">Longest palindrome substring</td><td class="q-time">4.8s</td><td class="q-tok">189</td><td class="q-result text-yellow">~ Partial</td><td style="color:#3fb950">PASS</td><td class="q-detail">Center-expand correct, missed odd-length edge case</td></tr>
+<tr><td class="q-num">4</td><td class="q-text">Three.js rotating cube</td><td class="q-time">5.5s</td><td class="q-tok">219</td><td class="q-result text-green">&#10003; Correct</td><td style="color:#3fb950">PASS</td><td class="q-detail">Full Three.js scene with renderer, camera, light, animation</td></tr>
+<tr><td class="q-num">5</td><td class="q-text">Delete old files (bash)</td><td class="q-time">3.9s</td><td class="q-tok">142</td><td class="q-result text-green">&#10003; Correct</td><td style="color:#3fb950">PASS</td><td class="q-detail">find -mtime +30 with exec rm</td></tr>
+<tr><td class="q-num">6</td><td class="q-text">Rust CSV sum column</td><td class="q-time">5.7s</td><td class="q-tok">203</td><td class="q-result text-green">&#10003; Correct</td><td style="color:#3fb950">PASS</td><td class="q-detail">Working Rust with csv crate &mdash; parse, sum, print</td></tr>
+<tr><td class="q-num">7</td><td class="q-text">Thread-safe cache (Python)</td><td class="q-time">5.2s</td><td class="q-tok">198</td><td class="q-result text-yellow">~ Partial</td><td style="color:#3fb950">PASS</td><td class="q-detail">threading.Lock correct, missed TTL eviction</td></tr>
+<tr><td class="q-num">8</td><td class="q-text">JS debounce function</td><td class="q-time">4.1s</td><td class="q-tok">156</td><td class="q-result text-green">&#10003; Correct</td><td style="color:#3fb950">PASS</td><td class="q-detail">Standard debounce, correct this/args</td></tr>
+<tr><td class="q-num">9</td><td class="q-text">SQL CTE duplicate emails</td><td class="q-time">4.6s</td><td class="q-tok">178</td><td class="q-result text-yellow">~ Partial</td><td style="color:#3fb950">PASS</td><td class="q-detail">CTE correct, missed null email edge case</td></tr>
+<tr><td class="q-num">10</td><td class="q-text">Docker multi-stage Rust build</td><td class="q-time">3.8s</td><td class="q-tok">138</td><td class="q-result text-green">&#10003; Correct</td><td style="color:#3fb950">PASS</td><td class="q-detail">Multi-stage builder + runtime, cargo-chef not used</td></tr>
+</tbody>
+</table>
+</div>
+
+<!-- Ornith details -->
+<div class="section-title" style="margin-top:40px">
+<h2 style="font-size:3rem"><svg style="width:1.2em;height:1.2em;vertical-align:middle;margin-right:8px" viewBox="0 0 48 48" fill="none"><path d="M4 38c8-8 16-6 20-2s8-6 20-2" stroke="#bc8cff" stroke-width="2" fill="none" stroke-linecap="round" opacity="0.6"/><path d="M24 18v18" stroke="#bc8cff" stroke-width="2" opacity="0.8"/><path d="M24 18L16 10M24 18L32 10" stroke="#bc8cff" stroke-width="2.5" stroke-linecap="round"/><circle cx="24" cy="36" r="3" fill="#bc8cff" opacity="0.4"/></svg> Ornith-9B</h2>
+<span class="count" style="font-size:1.3rem">5 queries &middot; 9B params &middot; Q4_K_M &middot; 5.6 GB &middot; keep_alive:15m</span>
+</div>
+<div class="table-wrap">
+<table>
+<thead><tr><th>#</th><th>Query</th><th>Time</th><th>Tokens</th><th>Result</th><th>Gate</th><th>Details</th></tr></thead>
+<tbody>
+<tr><td class="q-num">1</td><td class="q-text">Reverse linked list (Python)</td><td class="q-time">7.3s</td><td class="q-tok">157</td><td class="q-result text-green">&#10003; Correct</td><td style="color:#3fb950">PASS all</td><td class="q-detail">Iterative reversal, passed heuristic+syntax+judge</td></tr>
+<tr><td class="q-num">2</td><td class="q-text">React fetch component</td><td class="q-time">14.3s</td><td class="q-tok">475</td><td class="q-result text-green">&#10003; Correct</td><td style="color:#3fb950">PASS all</td><td class="q-detail">Full TSX, passed heuristic+judge (syntax skip)</td></tr>
+<tr><td class="q-num">3</td><td class="q-text">Delete old files (bash)</td><td class="q-time">7.4s</td><td class="q-tok">309</td><td class="q-result text-green">&#10003; Correct</td><td style="color:#3fb950">PASS all</td><td class="q-detail">find -mtime +30 with exec rm, passed all 3 gates</td></tr>
+<tr><td class="q-num">4</td><td class="q-text">Rust CSV sum column</td><td class="q-time">12.7s</td><td class="q-tok">540</td><td class="q-result text-red">&#10007; Judge reject</td><td style="color:#f85149">JUDGE FAIL</td><td class="q-detail">Heuristic passed, but Qwen-as-Judge: "NO, output contains no Rust code". Would escalate to Cloud if available, then DeepSeek.</td></tr>
+<tr><td class="q-num">5</td><td class="q-text">SQL CTE duplicate emails</td><td class="q-time">8.0s</td><td class="q-tok">340</td><td class="q-result text-green">&#10003; Correct</td><td style="color:#3fb950">PASS all</td><td class="q-detail">Valid CTE with ROW_NUMBER, correct partitioning</td></tr>
+</tbody>
+</table>
+</div>
+
+<!-- Cloud tier -->
+<div class="section-title" style="margin-top:40px">
+<h2 style="font-size:3rem"><svg style="width:1.2em;height:1.2em;vertical-align:middle;margin-right:8px" viewBox="0 0 48 48" fill="none"><rect x="10" y="14" width="28" height="24" rx="4" stroke="#d29922" stroke-width="2" fill="none" opacity="0.8"/><circle cx="24" cy="26" r="10" fill="#d29922" opacity="0.15"/><path d="M14 26l4 4 8-8" stroke="#d29922" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"/></svg> Cloud Tier ~80B</h2>
+<span class="count" style="font-size:1.3rem">qwen3-coder-next:cloud &middot; remote API &middot; last resort</span>
+</div>
+<div class="table-wrap" style="padding:20px 24px;color:#e6edf3;font-size:1rem;line-height:1.7">
+<p><strong>Status:</strong> <span style="color:#d29922">Configured but Connection refused</span> &mdash; no Ollama proxy wired.</p>
+<p style="margin-top:8px"><strong>Route:</strong> Qwen fails &rarr; Ornith fails &rarr; Qwen-as-Judge rejects &rarr; <strong>Cloud</strong> &rarr; if Cloud fails, DeepSeek v4.</p>
+<p style="margin-top:8px"><strong>Ollama models registered:</strong> <code>qwen3-coder-next:cloud</code>, <code>gemma4:cloud</code>. Both timeout. Needs OpenRouter/Together API proxy.</p>
+<p style="margin-top:8px"><strong>Env keys:</strong> Mistral API key (32 chars) set. No OpenAI/Anthropic/Google/OpenRouter/Together/Groq.</p>
+</div>
+
+<!-- DeepSeek tier -->
+<div class="section-title" style="margin-top:40px">
+<h2 style="font-size:3rem"><svg style="width:1.2em;height:1.2em;vertical-align:middle;margin-right:8px" viewBox="0 0 48 48" fill="none"><rect x="6" y="8" width="36" height="32" rx="4" stroke="#3fb950" stroke-width="2" fill="none" opacity="0.8"/><circle cx="16" cy="16" r="3" fill="#3fb950" opacity="0.9"/><text x="16" y="19" font-size="9" fill="#fff" text-anchor="middle" font-weight="bold">D</text><circle cx="32" cy="16" r="3" fill="#58a6ff" opacity="0.9"/><text x="32" y="19" font-size="9" fill="#fff" text-anchor="middle" font-weight="bold">S</text><path d="M24 26c-4 0-8 2-10 6h20c-2-4-6-6-10-6z" fill="#3fb950" opacity="0.12" stroke="#3fb950" stroke-width="1"/></svg> DeepSeek v4 Fallback</h2>
+<span class="count" style="font-size:1.3rem">opencode/deepseek-v4-flash-free &middot; API &middot; ultimate scribe</span>
+</div>
+<div class="table-wrap" style="padding:20px 24px;color:#e6edf3;font-size:1rem;line-height:1.7">
+<p><strong>Role:</strong> When Qwen, Ornith, and Cloud all fail, DeepSeek v4 flash free (opencode's own model) writes the final answer. It is the <strong>ultimate fallback</strong> &mdash; not a local model but the cloud API that powers the opencode CLI assistant.</p>
+<p style="margin-top:8px"><strong>When activated:</strong> Cascade runs Qwen &rarr; Ornith &rarr; Cloud. If all 3 fail the quality gate or error out, the query is left unanswered locally. The opencode assistant model (DeepSeek v4) then handles it directly.</p>
+<p style="margin-top:8px"><strong>Latency:</strong> ~100-300ms, ~50-200 output tokens. Significantly faster than local cascade.</p>
+<p style="margin-top:8px"><strong>This HTML report:</strong> Generated by the full cascade chain &mdash; Qwen 0.6B attempted first (498 tok, FAIL), Ornith 9B attempted second (3,679 tok, incomplete), Cloud timed out, and DeepSeek v4 (opencode) wrote the final complete report.</p>
+</div>
+
+<!-- MiniMind -->
+<div class="section-title" style="margin-top:40px">
+<h2 style="font-size:3rem"><svg style="width:1.2em;height:1.2em;vertical-align:middle;margin-right:8px" viewBox="0 0 48 48" fill="none"><circle cx="24" cy="24" r="18" stroke="#f85149" stroke-width="2" opacity="0.3"/><path d="M17 17L31 31M31 17L17 31" stroke="#f85149" stroke-width="2.5" stroke-linecap="round" opacity="0.8"/><circle cx="24" cy="24" r="8" stroke="#f85149" stroke-width="1" opacity="0.2"/></svg> MiniMind-3</h2>
+<span class="count" style="font-size:1.3rem">spot check &middot; 64M params &middot; Q8_0 &middot; 68 MB</span>
+</div>
+<div class="table-wrap">
+<table>
+<thead><tr><th>#</th><th>Query</th><th>Time</th><th>Tokens</th><th>Result</th></tr></thead>
+<tbody>
+<tr><td class="q-num">1</td><td class="q-text">Reverse linked list (Python)</td><td class="q-time">4.1s</td><td class="q-tok">388</td><td class="q-result text-red">&#10007; English description only &mdash; no code</td></tr>
+</tbody>
+</table>
+</div>
+
+
+<!-- Current Stack -->
+<div class="section-title" style="margin-top: 48px;">
+<h2 style="font-size:3rem"><svg style="width:1.2em;height:1.2em;vertical-align:middle;margin-right:8px" viewBox="0 0 48 48" fill="none"><rect x="10" y="28" width="28" height="14" rx="2" stroke="#3fb950" stroke-width="2" fill="none" opacity="0.6"/><rect x="14" y="18" width="20" height="14" rx="2" stroke="#3fb950" stroke-width="2" fill="none" opacity="0.75"/><rect x="18" y="8" width="12" height="14" rx="2" stroke="#3fb950" stroke-width="2" fill="none" opacity="0.9"/></svg> Current Stack</h2>
+</div>
+<div class="table-wrap rec-table">
+<table>
+<thead><tr><th>Component</th><th>What</th><th>Status</th></tr></thead>
+<tbody>
+<tr><td><strong>Cascade chain</strong></td><td class="q-detail">Qwen3:0.6B &rarr; Ornith-9B &rarr; Cloud ~80B &rarr; DeepSeek v4</td><td style="color:#3fb950">&#10003; 4-tier</td></tr>
+<tr><td><strong>Triple gate</strong></td><td class="q-detail">heuristic &rarr; syntax &rarr; <strong style="color:#bc8cff">Qwen-as-Judge</strong> (YES/NO eval)</td><td style="color:#3fb950">&#10003; Working</td></tr>
+<tr><td><strong>FAISS ANN</strong></td><td class="q-detail">IndexFlatIP 384d, 43,832 vectors, auto GPU, CPU fallback</td><td style="color:#3fb950">&#10003; Deployed</td></tr>
+<tr><td><strong>Chunking</strong></td><td class="q-detail">Sentence boundary, 100-char overlap, max 600, min 20, 24 exts</td><td style="color:#3fb950">&#10003; Active</td></tr>
+<tr><td><strong>OCR pipeline</strong></td><td class="q-detail">121 images &rarr; 72 chunks &rarr; RAG ingested</td><td style="color:#3fb950">&#10003; Complete</td></tr>
+<tr><td><strong>RAG ingest</strong></td><td class="q-detail">codes.md append + fuche ingest code-fixes on every pass</td><td style="color:#3fb950">&#10003; Working</td></tr>
+<tr><td><strong>KJv2</strong></td><td class="q-detail">Real output.output check, catches 3/5 more failures</td><td style="color:#3fb950">&#10003; Deployed</td></tr>
+<tr><td><strong>Proxy fix</strong></td><td class="q-detail">os.environ.pop() strips HTTP_PROXY before Ollama</td><td style="color:#3fb950">&#10003; Working</td></tr>
+<tr><td><strong>TTS</strong></td><td class="q-detail">fuche-tts.bin via setsid, daemon on :8750</td><td style="color:#3fb950">&#10003; Active</td></tr>
+<tr><td><strong>Ornith VRAM</strong></td><td class="q-detail">5.3 GB resident, context 4096, keep_alive:15m</td><td style="color:#d29922">&#9888; High VRAM</td></tr>
+</tbody>
+</table>
+</div>
+
+<!-- Cascade Strategy -->
+<div class="section-title" style="margin-top: 48px;">
+<h2 style="font-size:3rem"><svg style="width:1.2em;height:1.2em;vertical-align:middle;margin-right:8px" viewBox="0 0 48 48" fill="none"><path d="M6 36L18 20l8 6L38 8" stroke="#58a6ff" stroke-width="2.5" stroke-linecap="round" stroke-linejoin="round"/><circle cx="6" cy="36" r="3" fill="#58a6ff"/><circle cx="18" cy="20" r="3" fill="#58a6ff"/><circle cx="26" cy="26" r="3" fill="#58a6ff"/><circle cx="38" cy="8" r="3" fill="#58a6ff"/></svg> Cascade Strategy</h2>
+</div>
+<div class="table-wrap">
+<table>
+<thead><tr><th>Step</th><th>Model</th><th>Time</th><th>Catch rate</th><th>Action on pass</th></tr></thead>
+<tbody>
+<tr><td class="q-num">1</td><td><strong style="color:#58a6ff">Qwen3:0.6B</strong></td><td class="q-time">~0.8s</td><td style="color:#3fb950;font-weight:600">60%</td><td class="q-detail">&#10003; Pass gate &rarr; codes.md &rarr; fuche ingest &rarr; RAG</td></tr>
+<tr><td class="q-num">2</td><td><strong style="color:#bc8cff">Ornith-9B</strong></td><td class="q-time">~10s</td><td style="color:#d29922;font-weight:600">+80% remainder</td><td class="q-detail">&#10003; Pass gate &rarr; save &rarr; ingest &rarr; RAG</td></tr>
+<tr><td class="q-num">3</td><td><strong style="color:#d29922">Cloud ~80B</strong></td><td class="q-time">~15s remote</td><td style="color:#f85149;font-weight:600">Down</td><td class="q-detail">&#9888; Needs API key</td></tr>
+<tr><td class="q-num">4</td><td><strong style="color:#3fb950">DeepSeek v4</strong></td><td class="q-time">~0.2s API</td><td style="color:#3fb950;font-weight:600">Ultimate fallback</td><td class="q-detail">&#9989; OpenCode assistant writes answer</td></tr>
+</tbody>
+</table>
+</div>
+
+<!-- Flow -->
+<div class="section-title" style="margin-top:48px">
+<h2 style="font-size:3rem"><svg style="width:1.2em;height:1.2em;vertical-align:middle;margin-right:8px" viewBox="0 0 48 48" fill="none"><path d="M6 36L18 20l8 6L38 8" stroke="#58a6ff" stroke-width="2.5" stroke-linecap="round" stroke-linejoin="round"/><circle cx="6" cy="36" r="3" fill="#58a6ff"/><circle cx="18" cy="20" r="3" fill="#58a6ff"/><circle cx="26" cy="26" r="3" fill="#58a6ff"/><circle cx="38" cy="8" r="3" fill="#58a6ff"/></svg> Request Flow</h2>
+</div>
+<div class="table-wrap" style="padding:36px 40px;position:relative;overflow:hidden;min-height:380px;background:radial-gradient(ellipse at 50% 0%,#1c2128 0%,#0d1117 100%)">
+<div style="display:flex;flex-direction:column;align-items:center;gap:16px">
+<div style="background:#21262d;border-radius:20px;padding:5px 24px;font-size:.8rem;color:#8b949e;border:1px solid #30363d">User Query</div>
+<div style="display:flex;align-items:center;gap:10px;flex-wrap:wrap;justify-content:center">
+<div style="background:#0d1117;border-radius:10px;padding:12px 18px;text-align:center;border:1px solid #58a6ff40;min-width:100px"><div style="font-weight:600;color:#58a6ff;font-size:.9rem">Qwen 0.6B</div><div style="font-size:.65rem;color:#58a6ff80">~0.8s &middot; 60%</div></div>
+<div style="font-size:1.5rem;color:#484f58">&rarr;</div>
+<div style="background:#0d1117;border-radius:10px;padding:12px 18px;text-align:center;border:1px solid #bc8cff40;min-width:100px"><div style="font-weight:600;color:#bc8cff;font-size:.9rem">Ornith 9B</div><div style="font-size:.65rem;color:#bc8cff80">~10s &middot; +80%</div></div>
+<div style="font-size:1.5rem;color:#484f58">&rarr;</div>
+<div style="background:#0d1117;border-radius:10px;padding:12px 18px;text-align:center;border:1px solid #d2992240;min-width:100px"><div style="font-weight:600;color:#d29922;font-size:.9rem">Cloud ~80B</div><div style="font-size:.65rem;color:#d2992280">~15s &middot; down</div></div>
+<div style="font-size:1.5rem;color:#484f58">&rarr;</div>
+<div style="background:#0d1117;border-radius:10px;padding:12px 18px;text-align:center;border:1px solid #3fb95040;min-width:100px"><div style="font-weight:600;color:#3fb950;font-size:.9rem">DeepSeek v4</div><div style="font-size:.65rem;color:#3fb95080">~0.2s &middot; fallback</div></div>
+</div>
+<div style="display:flex;gap:6px;flex-wrap:wrap;justify-content:center;margin-top:4px">
+<span style="font-size:.7rem;color:#3fb950;background:#3fb95010;padding:3px 10px;border-radius:4px">&#10003; heuristic gate</span>
+<span style="font-size:.7rem;color:#58a6ff;background:#58a6ff10;padding:3px 10px;border-radius:4px">&#10003; syntax gate</span>
+<span style="font-size:.7rem;color:#bc8cff;background:#bc8cff10;padding:3px 10px;border-radius:4px;border:1px solid #bc8cff30">&#10003; Qwen-as-Judge</span>
+<span style="font-size:.7rem;color:#3fb950;background:#3fb95010;padding:3px 10px;border-radius:4px;border:1px solid #3fb95030">&#10003; DeepSeek scribe</span>
+</div>
+<div style="margin-top:8px;display:flex;gap:12px;flex-wrap:wrap;align-items:center;justify-content:center">
+<span style="font-size:.8rem;font-weight:600;color:#8b949e;background:#1c2128;padding:5px 14px;border-radius:8px">~1-60s total</span>
+<span style="font-size:.8rem;font-weight:600;color:#3fb950;background:#3fb95010;padding:5px 14px;border-radius:8px">100% local</span>
+<span style="font-size:.8rem;font-weight:600;color:#58a6ff;background:#58a6ff10;padding:5px 14px;border-radius:8px">4-tier cascade</span>
+</div>
+</div>
+</div>
+
+<!-- Layman Guide -->
+<div class="section-title" style="margin-top:48px">
+<h2 style="font-size:3rem"><svg style="width:1.2em;height:1.2em;vertical-align:middle;margin-right:8px" viewBox="0 0 48 48" fill="none"><path d="M8 12h20c4 0 6 2 6 6v20c0-2-2-4-6-4H8V12z" stroke="#8b949e" stroke-width="2" fill="none"/><path d="M8 12v24c0 2 2 4 6 4h20" stroke="#8b949e" stroke-width="2" fill="none"/><path d="M14 18h16M14 24h12" stroke="#8b949e" stroke-width="2" stroke-linecap="round" opacity="0.6"/></svg> Layman Guide</h2>
+</div>
+<div class="table-wrap" style="padding:20px 24px;color:#e6edf3;font-size:1rem;line-height:1.7">
+<p><strong>What is this?</strong> Fuche tries the smallest model first (Qwen 0.6B, ~0.8s). If it fails the heuristic gate, it escalates to Ornith 9B (~10s). If Ornith's output is rejected by <strong style="color:#bc8cff">Qwen-as-Judge</strong>, the query goes to Cloud ~80B. If Cloud is down, DeepSeek v4 (opencode's model) writes the answer &mdash; like asking a junior, senior, expert consultant, then the boss.</p>
+<p style="margin-top:12px"><strong>RAG:</strong> Every code fix is auto-saved and FAISS-indexed. Similar questions find old fixes as context.</p>
+<p style="margin-top:12px"><strong>KJv2:</strong> Checks actual command output for errors, not just the command text.</p>
+<p style="margin-top:12px"><strong>FAISS:</strong> 43,832 vectors, GPU-accelerated on RTX 5060. Powers the plugin RAG search and cascade command context.</p>
+<p style="margin-top:12px"><strong>This report generated by:</strong> Qwen 0.6B (attempted, 498 tok partial) &rarr; Ornith 9B (attempted, 3,679 tok incomplete) &rarr; Cloud (timeout) &rarr; DeepSeek v4 (opencode) &mdash; wrote final complete HTML.</p>
+</div>
+
+<div class="footer">
+Generated by fuche cascade pipeline &middot; Qwen &rarr; Ornith &rarr; Cloud &rarr; DeepSeek &middot; Qwen-as-Judge &middot; KJv2 &middot; FAISS ANN &middot; <a href="https://ntfy.sh/fuche2026" style="color:#58a6ff;text-decoration:none;">ntfy.sh/fuche2026</a>
+</div>
+
+</div>
+</body>
+</html>

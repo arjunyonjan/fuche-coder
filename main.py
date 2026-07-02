@@ -8,6 +8,7 @@ import time
 import requests
 
 from history import History
+from loop import extract_keywords, search, quality_check, refine_keywords
 
 logging.basicConfig(level=logging.INFO, format="%(message)s", stream=sys.stderr)
 log = logging.getLogger(__name__)
@@ -236,6 +237,36 @@ def is_code_question(text):
     return False
 
 
+def self_heal(question, max_loops=3, verbose=True):
+    keywords = extract_keywords(question) or question
+    best_quality = 0.0
+    best_result = ""
+    out = sys.stderr if not verbose else sys.stdout
+    for loop in range(1, max_loops + 1):
+        print(f"Loop {loop}: Searching with '{keywords}'", file=out)
+        result = search(keywords)
+        quality = quality_check(result, question)
+        print(f"Quality: {quality:.2f}", file=out)
+
+        if quality > best_quality:
+            best_quality = quality
+            best_result = result
+
+        if quality >= 0.7:
+            print("✅ Good result", file=out)
+            return result
+
+        if loop < max_loops:
+            keywords = refine_keywords(question, keywords, quality)
+            if quality < 0.3:
+                keywords = question
+            print(f"Refined keywords: {keywords}", file=out)
+            time.sleep(1)
+
+    print("⚠️ Max loops reached, returning best result", file=out)
+    return best_result
+
+
 def get_context(query, force_refresh=False):
     if not models.crawl:
         return None
@@ -249,7 +280,6 @@ def get_context(query, force_refresh=False):
         log.info("  ↳ offline — skipping web search")
         return None
 
-    from loop import self_heal
     try:
         results = self_heal(query, max_loops=3, verbose=False)
         if results:
@@ -367,10 +397,17 @@ def chat():
 
 def single_question(q):
     is_code = is_code_question(q)
+    if is_code:
+        from cascade import cascade_answer, classify_task
+        task = classify_task(q)
+        print(f"💻 Cascade [task={task}]", file=sys.stderr)
+        ans, model, chain, elapsed = cascade_answer(q)
+        print(ans)
+        return
     model = models.pick(is_code)
-    badge = "💻 Coder" if is_code else "🧠 Reasoner"
+    badge = "🧠 Reasoner"
     print(f"{badge} → {model}", file=sys.stderr)
-    hist = [{"role": "user", "content": q}] if is_code else [{"role": "system", "content": SYSTEM_PROMPT}, {"role": "user", "content": q}]
+    hist = [{"role": "system", "content": SYSTEM_PROMPT}, {"role": "user", "content": q}]
     ans, _ = ask_with_context(q, model, hist, temp=0.2)
     print(ans)
 

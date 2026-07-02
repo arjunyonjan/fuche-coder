@@ -3,23 +3,172 @@ cd ~/fuche-coder
 source venv/bin/activate
 [ -f ~/.fuche/env ] && source ~/.fuche/env
 
-if [ "$1" = "tts" ]; then
-    shift
-    # Auto-start daemon if socket is missing
-    if [ ! -S /tmp/jarvis.sock ]; then
-        echo "Daemon not found, starting jarvis-rs serve..."
-        MODEL=~/projects/rust-ai/jarvis-rs/models/Qwen3-TTS-12Hz-0.6B-CustomVoice
-        ~/fuche-coder/jarvis-rs serve --model "$MODEL" --socket /tmp/jarvis.sock > /tmp/jarvis.log 2>&1 &
-        echo "Waiting for model to load (tail -f /tmp/jarvis.log to watch)..."
-        while [ ! -S /tmp/jarvis.sock ]; do
-            if [ -f /tmp/jarvis.log ]; then
-                tail -1 /tmp/jarvis.log 2>/dev/null || true
-            fi
-            sleep 2
-        done
-        echo "Daemon ready."
+MODEL=~/projects/rust-ai/jarvis-rs/models/Qwen3-TTS-12Hz-0.6B-CustomVoice
+
+_health_check() {
+    python3 -c "
+import socket
+s = socket.socket(socket.AF_UNIX, socket.SOCK_STREAM)
+s.settimeout(3)
+try:
+    s.connect('/tmp/jarvis.sock')
+    s.sendall(b'GET /health HTTP/1.0\r\n\r\n')
+    resp = s.recv(1024)
+    s.close()
+    exit(0 if b'200 OK' in resp else 1)
+except Exception:
+    exit(1)
+" 2>/dev/null
+}
+
+_ensure_qwen_daemon() {
+    if [ -S /tmp/jarvis.sock ]; then
+        if _health_check; then
+            return 0
+        fi
+        echo "Daemon socket exists but unresponsive — restarting..." >&2
+        kill "$(cat /tmp/jarvis.pid 2>/dev/null)" 2>/dev/null || true
+        rm -f /tmp/jarvis.sock
     fi
-    python3 tts.py "$@"
-else
+
+    local max_retries=3
+    local try=0
+    while [ $try -lt $max_retries ]; do
+        try=$((try + 1))
+        echo "Starting jarvis-rs serve (attempt $try/$max_retries)..." >&2
+        ~/fuche-coder/jarvis-rs serve --model "$MODEL" --socket /tmp/jarvis.sock > /tmp/jarvis.log 2>&1 &
+        echo $! > /tmp/jarvis.pid
+
+        echo "Waiting for model to load..." >&2
+        local wait_sec=0
+        while [ ! -S /tmp/jarvis.sock ]; do
+            tail -1 /tmp/jarvis.log 2>/dev/null || true
+            sleep 2
+            wait_sec=$((wait_sec + 2))
+            if [ $wait_sec -ge 120 ]; then
+                echo "Timed out waiting for daemon to start." >&2
+                kill "$(cat /tmp/jarvis.pid)" 2>/dev/null || true
+                rm -f /tmp/jarvis.sock /tmp/jarvis.pid
+                break
+            fi
+        done
+
+        if [ -S /tmp/jarvis.sock ] && _health_check; then
+            echo "Qwen daemon ready." >&2
+            return 0
+        fi
+        echo "Daemon started but unresponsive, retrying..." >&2
+        kill "$(cat /tmp/jarvis.pid 2>/dev/null)" 2>/dev/null || true
+        rm -f /tmp/jarvis.sock /tmp/jarvis.pid
+    done
+
+    echo "Failed to start daemon after $max_retries attempts." >&2
+    return 1
+}
+
+case "$1" in
+  tts)
+    shift
+    TEXT="$*"
+    TTS_VOL=$(cat /tmp/tts_vol_target 2>/dev/null || echo "100")
+    BGM_SAVED=$(cat /tmp/bg_vol_target 2>/dev/null || echo "30")
+    BGM_DUCKED=$((BGM_SAVED / 3))
+    echo "$BGM_DUCKED" > /tmp/bg_vol_target
+    BGM_ID=$(pactl list sink-inputs 2>/dev/null | grep -B20 "bg-music" | grep "Sink Input #" | sed 's/.*#//')
+    [ -n "$BGM_ID" ] && pactl set-sink-input-volume "$BGM_ID" "${BGM_DUCKED}%" 2>/dev/null
+    # Snapshot sink-inputs before TTS
+    BEFORE=$(pactl list sink-inputs 2>/dev/null | grep "Sink Input #" | wc -l)
+    fuche-tts --port 8750 --speed 1.25 "$TEXT" &
+    TTS_PID=$!
+    sleep 2
+    # Find new sink-input (TTS stream) and set volume
+    NOW=$(pactl list sink-inputs 2>/dev/null | grep "Sink Input #")
+    AFTER=$(echo "$NOW" | wc -l)
+    if [ "$AFTER" -gt "$BEFORE" ]; then
+        TTS_ID=$(echo "$NOW" | tail -1 | sed 's/.*#//')
+        [ -n "$TTS_ID" ] && pactl set-sink-input-volume "$TTS_ID" "${TTS_VOL}%" 2>/dev/null
+    fi
+    wait $TTS_PID 2>/dev/null
+    echo "$BGM_SAVED" > /tmp/bg_vol_target
+    [ -n "$BGM_ID" ] && pactl set-sink-input-volume "$BGM_ID" "${BGM_SAVED}%" 2>/dev/null
+    ;;
+  watch)
+    shift
+    exec ~/.local/bin/fuche-watch.sh "$@"
+    ;;
+  budget)
+    unset HTTP_PROXY https_proxy http_proxy
+    python3 -c "
+import json, sys, os
+from collections import defaultdict
+
+path = '/tmp/token-tracker.jsonl'
+if not os.path.exists(path):
+    print('fuche budget: no data at /tmp/token-tracker.jsonl')
+    sys.exit(0)
+
+rows = 0
+stream = 0
+by_day = defaultdict(lambda: defaultdict(lambda: {'calls':0, 'in':0, 'out':0, 'total':0}))
+
+with open(path) as f:
+    for line in f:
+        line = line.strip()
+        if not line: continue
+        rows += 1
+        try:
+            rec = json.loads(line)
+        except: continue
+        if rec.get('stream'):
+            stream += 1
+            continue
+        day = rec.get('ts','')[:10]
+        model = rec.get('model','?')
+        def safe_int(v):
+            try: return int(v)
+            except: return 0
+        by_day[day][model]['calls'] += 1
+        by_day[day][model]['in'] += safe_int(rec.get('input_tokens',0))
+        by_day[day][model]['out'] += safe_int(rec.get('output_tokens',0))
+        by_day[day][model]['total'] += safe_int(rec.get('total_tokens',0))
+
+if rows == 0:
+    print('fuche budget: no entries yet — start chatting to log tokens')
+    sys.exit(0)
+
+gt_in = sum(d[m]['in'] for d in by_day.values() for m in d)
+gt_out = sum(d[m]['out'] for d in by_day.values() for m in d)
+gt_total = sum(d[m]['total'] for d in by_day.values() for m in d)
+
+print(f'fuche budget — {\"─\"*38}')
+for day in sorted(by_day):
+    print(f'  {day}')
+    for model in sorted(by_day[day]):
+        d = by_day[day][model]
+        print(f'    {model:30s} {d[\"calls\"]:3d} calls  in {d[\"in\"]:>8}  out {d[\"out\"]:>8}  ∑ {d[\"total\"]:>8}')
+print(f'  {\"─\"*42}')
+print(f'  grand total: {gt_total:,} tokens ({gt_in:,} in / {gt_out:,} out)')
+if stream:
+    print(f'  streaming calls: {stream}')
+" "$@"
+    ;;
+  ingest)
+    shift
+    unset HTTP_PROXY https_proxy http_proxy
+    TARGET="$1"
+    cd "$HOME/fuche-coder"
+    source venv/bin/activate
+    python3 search.py ingest "$TARGET"
+    ;;
+  search)
+    shift
+    unset HTTP_PROXY https_proxy http_proxy
+    cd "$HOME/fuche-coder"
+    source venv/bin/activate
+    python3 search.py search "$@"
+    ;;
+  *)
+    unset HTTP_PROXY https_proxy http_proxy
     python3 main.py "$@"
-fi
+    ;;
+esac
