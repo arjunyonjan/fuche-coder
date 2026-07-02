@@ -9,7 +9,7 @@ CODES_MD_FALLBACK = os.path.expanduser("~/codes.md")
 BASE_RAG = os.path.expanduser("~/.fuche")
 
 MODELS = {
-    "qwen":  {"name": "qwen3:0.6b",  "aliases": ["qwen3:0.6b-q4_K_M"], "think": False, "num_predict": 400},
+    "qwen":  {"name": "qwen3:0.6b",  "aliases": ["qwen3:0.6b-q4_K_M"], "think": False, "num_predict": 2048},
     "ornith":{"name": "hf.co/AlexAtomic/ornith-9b-GGUF:Q4_K_M", "aliases": ["ornith-32k:latest"], "think": False, "num_predict": 4096},
     "cloud": {"name": "qwen3-coder-next:cloud", "aliases": ["qwen3-coder:480b-cloud"], "think": False, "num_predict": 4096},
 }
@@ -77,10 +77,10 @@ def classify_task(query):
 def get_cascade(task_type):
     routes = {
         "tiny":        [MODELS["qwen"]],
-        "code_gen":    [MODELS["qwen"], MODELS["ornith"], MODELS["cloud"]],
-        "refactor":    [MODELS["qwen"], MODELS["ornith"], MODELS["cloud"]],
+        "code_gen":    [MODELS["ornith"], MODELS["cloud"]],
+        "refactor":    [MODELS["ornith"], MODELS["cloud"]],
         "architecture":[MODELS["cloud"]],
-        "complex":     [MODELS["qwen"], MODELS["ornith"], MODELS["cloud"]],
+        "complex":     [MODELS["ornith"], MODELS["cloud"]],
     }
     return routes.get(task_type, [MODELS["qwen"], MODELS["ornith"], MODELS["cloud"]])
 
@@ -104,7 +104,7 @@ def ask(model_cfg, messages, prev_error=""):
             data=json.dumps(payload).encode(),
             headers={"Content-Type": "application/json"},
         )
-        resp = urllib.request.urlopen(req, timeout=180)
+        resp = urllib.request.urlopen(req, timeout=60)
         data = json.loads(resp.read())
         content = data.get("message", {}).get("content", "")
         tok = data.get("eval_count", 0)
@@ -113,11 +113,37 @@ def ask(model_cfg, messages, prev_error=""):
     except Exception as e:
         return f"Error: {e}", 0, 0
 
+def detect_repetition(content):
+    """Detect repetitive/garbage patterns. Returns (has_issue, reason)."""
+    lines = content.split('\n')
+    # Check for repeated identical lines (>3x)
+    line_counts = {}
+    for l in lines:
+        l = l.strip()
+        if len(l) > 20:  # only meaningful lines
+            line_counts[l] = line_counts.get(l, 0) + 1
+    for text, count in line_counts.items():
+        if count > 5:
+            return True, f"line repeated {count}x"
+    # Check for repeated code blocks (duplicate fn/struct/class definitions)
+    blocks = re.findall(r'\b(?:fn |def |struct |class )\w+', content)
+    block_counts = {}
+    for b in blocks:
+        block_counts[b] = block_counts.get(b, 0) + 1
+    for b, c in block_counts.items():
+        if c > 3:
+            return True, f"definition '{b}' repeated {c}x"
+    return False, "ok"
+
 def heuristic_check(content, task_type):
     if not content or len(content) < 30:
         return False, "too short"
     if content.lower().startswith("error"):
         return False, "starts with error"
+    # Repetition check
+    has_repeat, reason = detect_repetition(content)
+    if has_repeat:
+        return False, f"repetitive garbage: {reason}"
     # Architecture/docs tasks don't need code keywords
     if task_type in ("architecture",):
         if len(content) < 1000:
@@ -129,12 +155,14 @@ def heuristic_check(content, task_type):
         found = sum(1 for t in req_terms if t in content.lower())
         if found < 8:
             return False, f"too vague ({found}/{len(req_terms)} required terms)"
-        # Require at least one table or code block
         if "|" not in content and "```" not in content:
             return False, "no tables or code blocks"
     else:
         if not has_code_keywords(content):
             return False, "no code keywords"
+        # For code tasks, require at least one code block
+        if task_type in ("code_gen", "refactor") and "```" not in content:
+            return False, "no code blocks"
     return True, "ok"
 
 def check_syntax(code, lang):
