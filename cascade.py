@@ -1,18 +1,26 @@
 #!/usr/bin/env python3
 """Model cascade with task routing + quality gate + sub-index RAG persistence."""
-import json, os, re, subprocess, sys, time, urllib.request
+import json, os, re, socket, subprocess, sys, time, urllib.request, urllib.error
 from search import search as _search, ingest_directory as _ingest
 
 OLLAMA = "http://localhost:11434"
+DEEPSEEK_API = "https://api.deepseek.com/v1/chat/completions"
+DEEPSEEK_KEY = os.environ.get("DEEPSEEK_KEY", "")
+if not DEEPSEEK_KEY:
+    cfg_path = os.path.expanduser("~/.fuche/config.json")
+    if os.path.exists(cfg_path):
+        DEEPSEEK_KEY = json.load(open(cfg_path)).get("deepseek_key", "")
 CODES_MD = "/mnt/c/Users/ACER/OneDrive/docs/codes.md"
 CODES_MD_FALLBACK = os.path.expanduser("~/codes.md")
 BASE_RAG = os.path.expanduser("~/.fuche")
+SEARCH_SOCKET = "/tmp/search-daemon.sock"
 
 MODELS = {
-    "qwen":  {"name": "qwen3:0.6b",  "aliases": ["qwen3:0.6b-q4_K_M"], "think": False, "num_predict": 2048},
-    "ornith":{"name": "hf.co/AlexAtomic/ornith-9b-GGUF:Q4_K_M", "aliases": ["ornith-32k:latest"], "think": False, "num_predict": 4096},
-    "qcloud":{"name": "qwen3-coder-next:cloud", "aliases": ["qwen3-coder:480b-cloud"], "think": False, "num_predict": 4096},
-    "ds":    {"name": "deepseek-v4-flash-free", "aliases": ["deepseek-v4-flash"], "think": False, "num_predict": 4096},
+    "qwen":    {"name": "qwen3:0.6b",  "aliases": ["qwen3:0.6b-q4_K_M"], "think": False, "num_predict": 2048},
+    "ornith":  {"name": "hf.co/AlexAtomic/ornith-9b-GGUF:Q4_K_M", "aliases": ["ornith-32k:latest"], "think": False, "num_predict": 4096},
+    "qcloud":  {"name": "qwen3-coder-next:cloud", "aliases": ["qwen3-coder:480b-cloud"], "think": False, "num_predict": 4096},
+    "ds":      {"name": "deepseek-v4-flash-free", "aliases": ["deepseek-v4-flash"], "think": False, "num_predict": 4096},
+    "ds-paid": {"name": "deepseek-v4-flash", "api": True, "think": False, "num_predict": 4096, "paid": True},
 }
 
 def verify_models():
@@ -42,8 +50,66 @@ def verify_models():
             print(f"  [{key}] {cfg['name']} NOT AVAILABLE — removing from cascade", file=sys.stderr)
             del MODELS[key]
 
-LABELS = {"qwen":"Qwen","ornith":"Ornith","qcloud":"Qwen Cloud","ds":"DeepSeek"}
-CLOUD_ONLY = {"ds"}  # models that never run locally, skip Ollama check
+def get_loaded_ollama_models():
+    """Check which models are actually loaded in Ollama memory."""
+    try:
+        req = urllib.request.Request(f"{OLLAMA}/api/ps", method="GET")
+        resp = urllib.request.urlopen(req, timeout=5)
+        data = json.loads(resp.read())
+        return {m["name"].split(":")[0] for m in data.get("models", [])}
+    except (urllib.error.URLError, json.JSONDecodeError, KeyError):
+        return set()
+CLOUD_ONLY = {"ds", "ds-paid"}  # models that never run locally, skip Ollama check
+BUDGET_FILE = os.path.expanduser("~/.fuche/budget.json")
+DAILY_LIMIT = 0.10
+HOURLY_LIMIT = 0.01
+DS_INPUT_PRICE = 0.15 / 1_000_000
+DS_OUTPUT_PRICE = 0.60 / 1_000_000
+
+def budget_check():
+    now = time.time()
+    bgt = {"date": time.strftime("%Y-%m-%d"), "spent": 0, "hourly_start": now, "hourly_spent": 0}
+    if os.path.exists(BUDGET_FILE):
+        bgt.update(json.load(open(BUDGET_FILE)))
+    if bgt["date"] != time.strftime("%Y-%m-%d"):
+        bgt["date"], bgt["spent"] = time.strftime("%Y-%m-%d"), 0
+    if now - bgt["hourly_start"] > 3600:
+        bgt["hourly_start"], bgt["hourly_spent"] = now, 0
+    return bgt["spent"] < DAILY_LIMIT and bgt["hourly_spent"] < HOURLY_LIMIT
+
+def budget_spend(input_tok, output_tok):
+    cost = input_tok * DS_INPUT_PRICE + output_tok * DS_OUTPUT_PRICE
+    now = time.time()
+    bgt = {"date": time.strftime("%Y-%m-%d"), "spent": 0, "hourly_start": now, "hourly_spent": 0}
+    if os.path.exists(BUDGET_FILE):
+        bgt.update(json.load(open(BUDGET_FILE)))
+    if bgt["date"] != time.strftime("%Y-%m-%d"):
+        bgt["date"], bgt["spent"] = time.strftime("%Y-%m-%d"), 0
+    if now - bgt["hourly_start"] > 3600:
+        bgt["hourly_start"], bgt["hourly_spent"] = now, 0
+    bgt["spent"] = round(bgt["spent"] + cost, 6)
+    bgt["hourly_spent"] = round(bgt["hourly_spent"] + cost, 6)
+    json.dump(bgt, open(BUDGET_FILE, "w"))
+    return cost
+
+def compress_query(query):
+    try:
+        s = socket.socket(socket.AF_UNIX, socket.SOCK_STREAM)
+        s.settimeout(5)
+        s.connect(SEARCH_SOCKET)
+        s.sendall(json.dumps({"query": query, "top_k": 3}).encode() + b"\n")
+        r = b""
+        while b"\n" not in r:
+            r += s.recv(4096)
+        data = json.loads(r.decode().strip())
+        s.close()
+        if data.get("results") and data["results"][0]["kw"] >= 0.7:
+            return True, data["results"][0]
+        return False, None
+    except Exception:
+        return False, None
+
+LABELS = {"qwen":"Qwen","ornith":"Ornith","qcloud":"Qwen Cloud","ds":"DeepSeek", "ds-paid": "DeepSeek Paid"}
 CODE_KEYWORDS = ["def ", "class ", "function", "=>", "import ", "fn ", "SELECT", "FROM", "docker", "COPY", "RUN", "const ", "let ", "var ", "echo ", "sudo ", "git ", "npm ", "pip ", "cargo ", "#!", "if ", "for ", "while ", "case ", "bash", "sh -c", "apt", "yum", "brew", "print(", "console.", "```", "return ", "public ", "private ", "void ", "int ", "String ", "bool ", "float "]
 
 verify_models()
@@ -80,18 +146,28 @@ def classify_task(query):
     return "code_gen"
 
 def get_cascade(task_type):
-    avail = MODELS  # already filtered by verify_models
+    avail = MODELS
     q = avail.get("qwen")
     o = avail.get("ornith")
     qc = avail.get("qcloud")
     d = avail.get("ds")
-    routes = {
-        "tiny":        [m for m in [q] if m],
-        "code_gen":    [m for m in [q, o, qc, d] if m],
-        "refactor":    [m for m in [q, o, qc, d] if m],
-        "architecture":[m for m in [qc] if m],
-        "complex":     [m for m in [q, o, qc, d] if m],
-    }
+    dp = avail.get("ds-paid")
+    if dp and DEEPSEEK_KEY and budget_check():
+        routes = {
+            "tiny":        [m for m in [q] if m],
+            "code_gen":    [m for m in [q, o, qc, d, dp] if m],
+            "refactor":    [m for m in [q, o, qc, d, dp] if m],
+            "architecture":[m for m in [qc, dp] if m],
+            "complex":     [m for m in [q, o, qc, d, dp] if m],
+        }
+    else:
+        routes = {
+            "tiny":        [m for m in [q] if m],
+            "code_gen":    [m for m in [q, o, qc, d] if m],
+            "refactor":    [m for m in [q, o, qc, d] if m],
+            "architecture":[m for m in [qc] if m],
+            "complex":     [m for m in [q, o, qc, d] if m],
+        }
     return routes.get(task_type, [m for m in [q, o, qc, d] if m])
 
 def ask(model_cfg, messages, prev_error=""):
@@ -120,6 +196,40 @@ def ask(model_cfg, messages, prev_error=""):
         tok = data.get("eval_count", 0)
         duration = data.get("total_duration", 0) / 1e9
         return content, tok, duration
+    except Exception as e:
+        return f"Error: {e}", 0, 0
+
+def ask_paid(compressed_query, original_query):
+    if not DEEPSEEK_KEY:
+        return "Error: No DeepSeek API key", 0, 0
+    if not budget_check():
+        return "Error: Budget exhausted", 0, 0
+    for k in ["HTTP_PROXY", "HTTPS_PROXY", "http_proxy", "https_proxy"]:
+        os.environ.pop(k, None)
+    payload = {
+        "model": "deepseek-v4-flash",
+        "messages": [
+            {"role": "system", "content": "You are a coding assistant. Provide working code only."},
+            {"role": "user", "content": f"[RAG context: {compressed_query['snippet'][:200]}]\n\n{original_query}"},
+        ],
+        "stream": False,
+        "max_tokens": 2048,
+        "temperature": 0,
+    }
+    try:
+        req = urllib.request.Request(
+            DEEPSEEK_API,
+            data=json.dumps(payload).encode(),
+            headers={"Content-Type": "application/json", "Authorization": f"Bearer {DEEPSEEK_KEY}"},
+        )
+        resp = urllib.request.urlopen(req, timeout=60)
+        data = json.loads(resp.read())
+        content = data["choices"][0]["message"]["content"]
+        usage = data.get("usage", {})
+        in_tok = usage.get("prompt_tokens", 0)
+        out_tok = usage.get("completion_tokens", 0)
+        cost = budget_spend(in_tok, out_tok)
+        return content, in_tok + out_tok, cost
     except Exception as e:
         return f"Error: {e}", 0, 0
 
@@ -346,6 +456,9 @@ def cascade_answer(query):
     total_t0 = time.time()
     content = ""
     short_name = ""
+    compressed = compress_query(query) if DEEPSEEK_KEY else (False, None)
+    if compressed[0]:
+        print(f"  RAG hit: kw={compressed[1]['kw']:.3f} src={compressed[1]['source']}", file=sys.stderr)
 
     for model_cfg in cascade:
         model_name = model_cfg["name"]
@@ -354,7 +467,16 @@ def cascade_answer(query):
         print(f"  [{short_name}] trying...", file=sys.stderr)
 
         t0 = time.time()
-        content, tok, _ = ask(model_cfg, messages.copy(), prev_error)
+        if model_cfg.get("paid"):
+            hit, info = compressed
+            if hit:
+                content, tok, _ = ask_paid(info, query)
+            else:
+                print(f"  [{short_name}] no RAG hit, skipping paid tier", file=sys.stderr)
+                prev_error = "No RAG compression available for paid tier"
+                continue
+        else:
+            content, tok, _ = ask(model_cfg, messages.copy(), prev_error)
         elapsed = time.time() - t0
         print(f"  [{short_name}] {elapsed:.1f}s, {tok}tok", file=sys.stderr)
 
@@ -371,9 +493,10 @@ def cascade_answer(query):
                 print(f"  → saved to {codes_path}", file=sys.stderr)
             fuche_ingest("code-fixes")
             print(f"  → ingested into RAG (code-fixes)", file=sys.stderr)
-            # write cascade status for UI - mark current model loaded
+            # write cascade status for UI - check actual Ollama loaded state
             import json
-            status_models = [{"name": cfg["name"], "label": LABELS.get(key, key.capitalize()), "loaded": (cfg["name"] == model_cfg["name"])} for key, cfg in MODELS.items()]
+            loaded = get_loaded_ollama_models()
+            status_models = [{"name": cfg["name"], "label": LABELS.get(key, key.capitalize()), "loaded": (cfg["name"].split(":")[0] in loaded)} for key, cfg in MODELS.items()]
             json.dump(status_models, open("/tmp/.cascade-status", "w"))
             return content, short_name, chain, total
         else:
@@ -382,9 +505,10 @@ def cascade_answer(query):
 
     total = time.time() - total_t0
     print(f"  All models failed — returning best attempt", file=sys.stderr)
-    # write cascade status for UI - all models unloaded
+    # write cascade status for UI - check actual Ollama loaded state
     import json
-    status_models = [{"name": cfg["name"], "label": LABELS.get(key, key.capitalize()), "loaded": False} for key, cfg in MODELS.items()]
+    loaded = get_loaded_ollama_models()
+    status_models = [{"name": cfg["name"], "label": LABELS.get(key, key.capitalize()), "loaded": (cfg["name"].split(":")[0] in loaded)} for key, cfg in MODELS.items()]
     json.dump(status_models, open("/tmp/.cascade-status", "w"))
     return content, short_name, chain, total
 

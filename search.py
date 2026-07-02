@@ -1,6 +1,6 @@
 """Shared search + ingest for Fuche RAG. Single import used by fuche, plugin, cascade."""
 
-import csv, hashlib, json, os, re, sys, time, urllib.request, urllib.error
+import csv, hashlib, json, os, re, sys, time, socket, threading
 from pathlib import Path
 
 import numpy as np
@@ -11,8 +11,16 @@ try:
 except ImportError:
     HAS_FAISS = False
 
-OLLAMA = "http://localhost:11434"
-EMBED_MODEL = "all-minilm:latest"
+_MODEL = None
+
+def _get_model():
+    global _MODEL
+    if _MODEL is None:
+        from sentence_transformers import SentenceTransformer
+        _MODEL = SentenceTransformer("all-MiniLM-L6-v2", device="cuda")
+    return _MODEL
+
+EMBED_MODEL = "all-MiniLM-L6-v2"
 BASE_RAG = os.path.expanduser("~/.fuche")
 DIM = 384
 BATCH_SIZE = 20
@@ -55,18 +63,14 @@ GPU_RES = _gpu_resources()
 
 
 def embed(texts):
-    _no_proxy()
+    model = _get_model()
     single = isinstance(texts, str)
     inputs = [texts] if single else texts
     inputs = [t[:MAX_CHARS] if len(t) > MAX_CHARS else t for t in inputs]
-    payload = json.dumps({"model": EMBED_MODEL, "input": inputs}).encode()
-    req = urllib.request.Request(
-        f"{OLLAMA}/api/embed", data=payload,
-        headers={"Content-Type": "application/json"},
-    )
-    resp = urllib.request.urlopen(req, timeout=120)
-    data = json.loads(resp.read())
-    embs = np.array(data["embeddings"], dtype=np.float32)
+    embs = model.encode(inputs, normalize_embeddings=True, show_progress_bar=False)
+    embs = np.array(embs, dtype=np.float32)
+    if embs.ndim == 1:
+        embs = embs.reshape(1, -1)
     return embs
 
 
@@ -382,5 +386,62 @@ if __name__ == "__main__":
     elif cmd == "reindex":
         coll = sys.argv[2] if len(sys.argv) > 2 else ""
         rebuild_index(coll)
+    elif cmd == "--daemon":
+        _no_proxy()
+        sock_path = "/tmp/search-daemon.sock"
+        if os.path.exists(sock_path):
+            os.unlink(sock_path)
+        state = load_index("")  # pre-warm: load FAISS once
+        _get_model()  # pre-warm: load sentence-transformers model once
+        server = socket.socket(socket.AF_UNIX, socket.SOCK_STREAM)
+        server.bind(sock_path)
+        server.listen(5)
+        os.chmod(sock_path, 0o666)
+
+        def handle(conn):
+            f = conn.makefile("r", buffering=1)
+            w = conn.makefile("w", buffering=1)
+            for line in f:
+                try:
+                    msg = json.loads(line.strip())
+                    q = msg.get("query", "")
+                    top_k = msg.get("top_k", 10)
+                    coll = msg.get("collection", "")
+                    ft = msg.get("file_type", "")
+                    local_state = load_index(coll) if coll else state
+                    results = []
+                    qv = embed(q)[0]
+                    fetch_k = min(top_k * 3 + 20, len(local_state["emb_ids"]))
+                    if local_state["index"] is not None:
+                        scores, indices = local_state["index"].search(qv.reshape(1, -1), fetch_k)
+                        scores, indices = scores[0], indices[0]
+                    else:
+                        embs = np.load(local_state["emb_path"])
+                        scores = qv @ embs.T
+                        indices = np.argsort(scores)[::-1][:fetch_k]
+                        scores = scores[indices]
+                    for i, idx in enumerate(indices):
+                        if idx < 0 or idx >= len(local_state["emb_ids"]):
+                            continue
+                        h = local_state["emb_ids"][idx]
+                        src = local_state["src_map"].get(h, "?")
+                        snip = local_state["snip_map"].get(h, "")
+                        if ft and not src.endswith(ft):
+                            continue
+                        kw = _keyword_score(q, snip)
+                        combined = 0.6 * float(scores[i]) + 0.4 * kw
+                        results.append((combined, float(scores[i]), kw, src, snip))
+                    results.sort(key=lambda r: r[0], reverse=True)
+                    results = results[:top_k]
+                    w.write(json.dumps({"results": [{"combined": r[0], "faiss": r[1], "kw": r[2], "source": r[3], "snippet": r[4][:200]} for r in results]}) + "\n")
+                    w.flush()
+                except Exception:
+                    w.write(json.dumps({"results": []}) + "\n")
+                    w.flush()
+            conn.close()
+
+        while True:
+            conn, _ = server.accept()
+            threading.Thread(target=handle, args=(conn,), daemon=True).start()
     else:
-        print("Usage: search.py [search|ingest|reindex] ...")
+        print("Usage: search.py [search|ingest|reindex|--daemon] ...")
