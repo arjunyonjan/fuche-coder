@@ -333,6 +333,10 @@ def cascade_answer(query):
                 print(f"  → saved to {codes_path}", file=sys.stderr)
             fuche_ingest("code-fixes")
             print(f"  → ingested into RAG (code-fixes)", file=sys.stderr)
+            # write cascade status for UI - mark current model loaded
+            import json
+            status_models = [{"name": cfg["name"], "label": key.capitalize(), "loaded": (cfg["name"] == model_cfg["name"])} for key, cfg in MODELS.items()]
+            json.dump(status_models, open("/tmp/.cascade-status", "w"))
             return content, short_name, chain, total
         else:
             prev_error = f"Model output failed quality check: {reason}"
@@ -340,6 +344,10 @@ def cascade_answer(query):
 
     total = time.time() - total_t0
     print(f"  All models failed — returning best attempt", file=sys.stderr)
+    # write cascade status for UI - all models unloaded
+    import json
+    status_models = [{"name": cfg["name"], "label": key.capitalize(), "loaded": False} for key, cfg in MODELS.items()]
+    json.dump(status_models, open("/tmp/.cascade-status", "w"))
     return content, short_name, chain, total
 
 if __name__ == "__main__":
