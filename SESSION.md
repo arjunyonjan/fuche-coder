@@ -158,15 +158,38 @@ RTX 5060 Laptop GPU = **CC 12.0** (Blackwell). `candle-flash-attn v0.9.2` compil
 ## CLI Cheatsheet
 
 ```bash
-fuche tts "text"                              # defaults: BF16 + calm + flanger,reverb + fast
+fuche tts "text"                              # defaults: BF16 + calm + flanger,reverb + fast + speed 1.2
 fuche tts "text" --style news --fx none       # override style/FX
 fuche tts "text" --voice vivian               # switch voice
+fuche tts "text" --speed 1.0                  # normal speed (no time-stretch)
+fuche tts "text" --speed 1.5                  # even faster (50% faster)
 fuche tts "text" --instruct "Speak like Yoda" # custom instruct
 fuche tts --daemon                            # start daemon (blocking)
 
 # Health check
 curl --unix-socket /tmp/jarvis.sock http://localhost/health
 ```
+
+### 20. WSOLA Time-Stretch — Voice Speed Control (June 18)
+
+Added `--speed` flag for time-stretching audio without changing pitch:
+
+**Rust** (`dsp.rs`): `TimeStretch` struct implements WSOLA (Waveform Similarity Overlap-Add):
+- Window size: 512 samples (~21ms at 24kHz), 50% overlap
+- Cross-correlation alignment within ±128 samples for phase coherence
+- Hann window + overlap-add normalization
+- Pure f32 DSP, no external deps, ~80 lines
+
+**FxConfig**: Added `SpeedParams { rate: f32 }` and `speed: Option<SpeedParams>` field. `has_effects()` includes speed.
+
+**CLI**: `--speed <f32>` in both `jarvis-rs` (main.rs + serve.rs) and `tts.py`. Default: 1.2 in tts.py, 1.0 in jarvis-rs (backward compat).
+
+**Performance**: time_stretch overhead = 14-29ms (negligible vs 2.8-4.5s inference).
+- speed=1.0: 4.86s (44 chars)
+- speed=1.2: 4.05s (20% faster) ✓
+- speed=1.5: 3.24s (50% faster) ✓
+
+**Daemon protocol**: `{"speed": 1.2}` in request JSON. Missing/serde default = `None` → no-op. Time-stretch applied after FX in fast path only (streaming path skips).
 
 ## Git
 
