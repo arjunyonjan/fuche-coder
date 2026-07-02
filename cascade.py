@@ -11,7 +11,8 @@ BASE_RAG = os.path.expanduser("~/.fuche")
 MODELS = {
     "qwen":  {"name": "qwen3:0.6b",  "aliases": ["qwen3:0.6b-q4_K_M"], "think": False, "num_predict": 2048},
     "ornith":{"name": "hf.co/AlexAtomic/ornith-9b-GGUF:Q4_K_M", "aliases": ["ornith-32k:latest"], "think": False, "num_predict": 4096},
-    "cloud": {"name": "qwen3-coder-next:cloud", "aliases": ["qwen3-coder:480b-cloud"], "think": False, "num_predict": 4096},
+    "qcloud":{"name": "qwen3-coder-next:cloud", "aliases": ["qwen3-coder:480b-cloud"], "think": False, "num_predict": 4096},
+    "ds":    {"name": "deepseek-v4-flash-free", "aliases": ["deepseek-v4-flash"], "think": False, "num_predict": 4096},
 }
 
 def verify_models():
@@ -25,6 +26,8 @@ def verify_models():
         print("  ⚠ Cannot reach Ollama — models not verified", file=sys.stderr)
         return
     for key, cfg in list(MODELS.items()):
+        if key in CLOUD_ONLY:
+            continue  # skip Ollama check for cloud-only models
         if cfg["name"] in available:
             continue
         found = None
@@ -39,9 +42,11 @@ def verify_models():
             print(f"  [{key}] {cfg['name']} NOT AVAILABLE — removing from cascade", file=sys.stderr)
             del MODELS[key]
 
-verify_models()
-
+LABELS = {"qwen":"Qwen","ornith":"Ornith","qcloud":"Qwen Cloud","ds":"DeepSeek"}
+CLOUD_ONLY = {"ds"}  # models that never run locally, skip Ollama check
 CODE_KEYWORDS = ["def ", "class ", "function", "=>", "import ", "fn ", "SELECT", "FROM", "docker", "COPY", "RUN", "const ", "let ", "var ", "echo ", "sudo ", "git ", "npm ", "pip ", "cargo ", "#!", "if ", "for ", "while ", "case ", "bash", "sh -c", "apt", "yum", "brew", "print(", "console.", "```", "return ", "public ", "private ", "void ", "int ", "String ", "bool ", "float "]
+
+verify_models()
 
 def has_code_keywords(content):
     if any(kw in content for kw in CODE_KEYWORDS):
@@ -75,14 +80,19 @@ def classify_task(query):
     return "code_gen"
 
 def get_cascade(task_type):
+    avail = MODELS  # already filtered by verify_models
+    q = avail.get("qwen")
+    o = avail.get("ornith")
+    qc = avail.get("qcloud")
+    d = avail.get("ds")
     routes = {
-        "tiny":        [MODELS["qwen"]],
-        "code_gen":    [MODELS["ornith"], MODELS["cloud"]],
-        "refactor":    [MODELS["ornith"], MODELS["cloud"]],
-        "architecture":[MODELS["cloud"]],
-        "complex":     [MODELS["ornith"], MODELS["cloud"]],
+        "tiny":        [m for m in [q] if m],
+        "code_gen":    [m for m in [q, o, qc, d] if m],
+        "refactor":    [m for m in [q, o, qc, d] if m],
+        "architecture":[m for m in [qc] if m],
+        "complex":     [m for m in [q, o, qc, d] if m],
     }
-    return routes.get(task_type, [MODELS["qwen"], MODELS["ornith"], MODELS["cloud"]])
+    return routes.get(task_type, [m for m in [q, o, qc, d] if m])
 
 def ask(model_cfg, messages, prev_error=""):
     for k in ["HTTP_PROXY", "HTTPS_PROXY", "http_proxy", "https_proxy"]:
@@ -363,7 +373,7 @@ def cascade_answer(query):
             print(f"  → ingested into RAG (code-fixes)", file=sys.stderr)
             # write cascade status for UI - mark current model loaded
             import json
-            status_models = [{"name": cfg["name"], "label": key.capitalize(), "loaded": (cfg["name"] == model_cfg["name"])} for key, cfg in MODELS.items()]
+            status_models = [{"name": cfg["name"], "label": LABELS.get(key, key.capitalize()), "loaded": (cfg["name"] == model_cfg["name"])} for key, cfg in MODELS.items()]
             json.dump(status_models, open("/tmp/.cascade-status", "w"))
             return content, short_name, chain, total
         else:
@@ -374,7 +384,7 @@ def cascade_answer(query):
     print(f"  All models failed — returning best attempt", file=sys.stderr)
     # write cascade status for UI - all models unloaded
     import json
-    status_models = [{"name": cfg["name"], "label": key.capitalize(), "loaded": False} for key, cfg in MODELS.items()]
+    status_models = [{"name": cfg["name"], "label": LABELS.get(key, key.capitalize()), "loaded": False} for key, cfg in MODELS.items()]
     json.dump(status_models, open("/tmp/.cascade-status", "w"))
     return content, short_name, chain, total
 
