@@ -191,7 +191,35 @@ Added `--speed` flag for time-stretching audio without changing pitch:
 
 **Daemon protocol**: `{"speed": 1.2}` in request JSON. Missing/serde default = `None` → no-op. Time-stretch applied after FX in fast path only (streaming path skips).
 
+---
+### July 2, 2026 — Session 3 — Cascade Monitoring & Token Compressor
+
+### 21. AI Server Ping Monitor — cascade status
+`ping-ai.sh` reads runtime model from opencode.db and TCP-pings provider host. Output cached to `/tmp/.ai-status` every 5 min via cron. Colors: fast (● <500ms), ok (● 500-2000ms), slow (● >2000ms), unreach (✗ timeout).
+
+**OpenCode instruction** (`server-ping.md`): AI prefixes every response with status + cascade chain.
+
+### 22. Cascade status heartbeat
+`ai-ping-heartbeat.sh` writes both `/tmp/.ai-status` and `/tmp/.cascade-status` (from `localhost:3000/cascade`). Cron-driven.
+
+### 23. Prompt dot in PS1
+`~/.bashrc`: `__ai_dot()` shows colored ● before shell prompt based on `/tmp/.ai-status`.
+
+### 24. fuche alias — cascade bar
+Modified alias in `~/.bashrc` to print cascade status before OpenCode starts.
+
+### 25. cascade.py — dynamic status update
+Added `json.dump` of loaded/unloaded status to `/tmp/.cascade-status` after each cascade run. Only model that passed quality gate shows ●.
+
+### 26. Token Compressor HTML — cascade panel + Speak button
+Updated `frontend/index.html`:
+- Cascade chain visualization with arrows showing active model
+- Speak button sends compressed text to `/tts` endpoint
+- Better styling, responsive indicators
+
+### 27. KB docs updated
+`ai-server-ping-monitor.md` and `qwen-code-deepseek-api.md` updated with current system state.
+
 ## Git
 
-**fuche-coder** (origin/master): `e432dcc` → `85f6bcc` → `0a89319` → `a531e91` → `a2598e5` → `3c5f89f` → `cca2eb7`
-**jarvis-rs** (local): `77cfcba` → `1e058bf` → `d42104f`
+**fuche-coder** (origin/master): `e432dcc` → `85f6bcc` → `0a89319` → `a531e91` → `a2598e5` → `3c5f89f` → `cca2eb7` → `7ebba99` → `b67c8ca` → `d04987b`

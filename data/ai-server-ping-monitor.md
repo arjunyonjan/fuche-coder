@@ -12,7 +12,7 @@ Pings the current OpenCode provider's host (TCP connect), measures latency, repo
 | unreach | Red ✗ | timeout | Server down |
 
 ## Cascade Status
-Cascade model load status fetched from Rust compressor server (`localhost:3000/cascade`) and written to `/tmp/.cascade-status`.
+Cascade model load status fetched from localhost:3000/cascade and written to `/tmp/.cascade-status`.
 
 **Display format**: `cascade — Qwen ●, Ornith ○, DeepSeek ○`
 - ● = model loaded in Ollama
@@ -21,15 +21,22 @@ Cascade model load status fetched from Rust compressor server (`localhost:3000/c
 **Displayed in**:
 - **Every OpenCode response** (via server-ping.md instruction)
 - **fuche alias** — prints cascade bar before OpenCode starts
-- **Cascade panel** in frontend HTML (`localhost:8080`) with official Qwen/DeepSeek SVGs
+- **Cascade panel** in token compressor frontend (`localhost:8080`) with official SVGs
 
 ## Components
-- **ping-ai.sh** (`~/.local/bin/ping-ai.sh`) — reads runtime model from `opencode.db`, selects host per provider (`api.deepseek.com` for opencode, `api.ollama.com` for ollama-cloud), measures TCP connect time
+- **ping-ai.sh** (`~/.local/bin/ping-ai.sh`) — reads runtime model from `opencode.db`, selects host per provider, measures TCP connect time
 - **cron** — `*/5 * * * *` → writes JSON to `/tmp/.ai-status`
-- **ai-ping-heartbeat.sh** — wraps ping + cascade status + writes both + TTS if slow. Runs from cron and on demand.
-- **Prompt dot** (`~/.bashrc`) — `__ai_dot()` function prepended to PS1, shows colored dot before each shell command
-- **OpenCode instruction** (`~/.config/opencode/instructions/server-ping.md`) — model reads `/tmp/.ai-status` and `/tmp/.cascade-status`, prefixes response with status + cascade chain
-- **fuche alias** — reads `/tmp/.cascade-status` and prints cascade bar before launching OpenCode
+- **ai-ping-heartbeat.sh** — wraps ping + cascade status + writes both + TTS if slow
+- **Prompt dot** (`~/.bashrc`) — `__ai_dot()` in PS1, colored dot before each shell command
+- **OpenCode instruction** (`~/.config/opencode/instructions/server-ping.md`) — AI prefixes response with status + cascade chain
+- **fuche alias** — reads `/tmp/.cascade-status` and prints cascade bar before OpenCode
+- **cascade.py** (`~/fuche-coder/cascade.py`) — model cascade with quality gate, writes updated status after each cascade run
+
+## Token Compressor
+- **Rust server** on `:3000` with `/compress` and `/cascade` endpoints
+- **Frontend** at `localhost:8080` (live-server serving `frontend/index.html`)
+- Cascade panel shows model icons (Qwen, Ornith, DeepSeek) with ●/○ loaded indicators
+- Speak button sends compressed text to `/tts` endpoint
 
 ## Providers
 | Provider | Host | Key required? |
@@ -39,5 +46,3 @@ Cascade model load status fetched from Rust compressor server (`localhost:3000/c
 
 ## OpenCode Response Prefix
 Format: `🟢/🟡/🔴 + ms | cascade — Qwen ●, Ornith ○, DeepSeek ○`
-
-Example: `🟢 84ms | cascade — Qwen ●, Ornith ○, DeepSeek ○`
