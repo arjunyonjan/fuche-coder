@@ -1,5 +1,6 @@
 #!/bin/bash
 cd ~/fuche-coder
+source venv/bin/activate
 [ -f ~/.fuche/env ] && source ~/.fuche/env
 
 MODEL=~/projects/rust-ai/jarvis-rs/models/Qwen3-TTS-12Hz-0.6B-CustomVoice
@@ -156,7 +157,8 @@ if stream:
     unset HTTP_PROXY https_proxy http_proxy
     TARGET="$1"
     cd "$HOME/fuche-coder"
-    uv run python3 search.py ingest "$TARGET"
+    source venv/bin/activate
+    python3 search.py ingest "$TARGET"
     ;;
   search)
     shift
@@ -182,14 +184,9 @@ for i, r in enumerate(results):
 "
     else
       cd "$HOME/fuche-coder"
-      uv run python3 search.py search "$@"
+      source venv/bin/activate
+      python3 search.py search "$@"
     fi
-    ;;
-  clean)
-    shift
-    unset HTTP_PROXY https_proxy http_proxy
-    cd "$HOME/fuche-coder"
-    uv run python3 cleanup.py "$@"
     ;;
   *)
     unset HTTP_PROXY https_proxy http_proxy

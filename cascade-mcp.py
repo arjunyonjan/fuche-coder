@@ -1,6 +1,7 @@
 #!/usr/bin/env python3
 """MCP server for model cascade — supports daemon mode."""
 import json, sys, os, socket, threading
+from mcp_cleanup import TOOL_DEF as CLEANUP_TOOL, handle_cleanup
 sys.path.insert(0, "/home/arjun/fuche-coder")
 from cascade import cascade_answer
 
@@ -29,7 +30,7 @@ def handle_request(line, conn):
         conn.respond(mid, {"protocolVersion": "2024-11-05", "capabilities": {"tools": {}}, "serverInfo": {"name": "cascade", "version": "1.0.0"}})
     elif method == "listTools":
         conn.respond(mid, {
-            "tools": [{
+            "tools": [CLEANUP_TOOL, {
                 "name": "cascade_query",
                 "description": "Run a coding query through the 4-model cascade (Qwen->Ornith->Qwen Cloud->DeepSeek) with quality gate and RAG persistence",
                 "inputSchema": {
@@ -41,6 +42,15 @@ def handle_request(line, conn):
         })
     elif method == "tools/call":
         args = msg.get("params", {}).get("arguments", {})
+        method_name = msg.get("params", {}).get("name", "")
+        if method_name == "system_cleanup":
+            mode = args.get("mode", "dry-run")
+            result = handle_cleanup(mode)
+            conn.respond(mid, {
+                "content": [{"type": "text", "text": result}],
+                "isError": False
+            })
+            return
         query = args.get("query", "")
         try:
             content, model, chain, elapsed = cascade_answer(query)

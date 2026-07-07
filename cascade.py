@@ -1,6 +1,6 @@
 #!/usr/bin/env python3
 """Model cascade with task routing + quality gate + sub-index RAG persistence."""
-import json, os, re, socket, subprocess, sys, time, urllib.request, urllib.error
+import json, os, re, socket, subprocess, sys, time, urllib.parse, urllib.request, urllib.error
 from search import search as _search, ingest_directory as _ingest
 
 OLLAMA = "http://localhost:11434"
@@ -19,7 +19,7 @@ MODELS = {
     "qwen":    {"name": "qwen3:0.6b",  "aliases": ["qwen3:0.6b-q4_K_M"], "think": False, "num_predict": 2048},
     "ornith":  {"name": "hf.co/AlexAtomic/ornith-9b-GGUF:Q4_K_M", "aliases": ["ornith-32k:latest"], "think": False, "num_predict": 4096},
     "qcloud":  {"name": "qwen3-coder-next:cloud", "aliases": ["qwen3-coder:480b-cloud"], "think": False, "num_predict": 4096},
-    "ds":      {"name": "deepseek-v4-flash-free", "aliases": ["deepseek-v4-flash"], "think": False, "num_predict": 4096},
+    "ds": {"name": "deepseek-v4-flash", "api": True, "think": False, "num_predict": 4096},
     "ds-paid": {"name": "deepseek-v4-flash", "api": True, "think": False, "num_predict": 4096, "paid": True},
 }
 
@@ -177,7 +177,7 @@ def ask(model_cfg, messages, prev_error=""):
         "model": model_cfg["name"],
         "messages": messages,
         "stream": False,
-        "keep_alive": "15m",
+        "keep_alive": "1h",
         "options": {"temperature": 0, "num_predict": model_cfg["num_predict"]},
     }
     if model_cfg.get("think") is False:
@@ -206,11 +206,14 @@ def ask_paid(compressed_query, original_query):
         return "Error: Budget exhausted", 0, 0
     for k in ["HTTP_PROXY", "HTTPS_PROXY", "http_proxy", "https_proxy"]:
         os.environ.pop(k, None)
+    rag = ""
+    if compressed_query and compressed_query.get("snippet"):
+        rag = "[RAG context: " + compressed_query["snippet"][:200] + "]\n\n"
     payload = {
         "model": "deepseek-v4-flash",
         "messages": [
             {"role": "system", "content": "You are a coding assistant. Provide working code only."},
-            {"role": "user", "content": f"[RAG context: {compressed_query['snippet'][:200]}]\n\n{original_query}"},
+            {"role": "user", "content": rag + original_query},
         ],
         "stream": False,
         "max_tokens": 2048,
@@ -436,6 +439,15 @@ def search_commands(query):
         pass
     return ""
 
+def web_search(query, top_k=5):
+    try:
+        from ddgs import DDGS
+        with DDGS() as ddgs:
+            results = list(ddgs.text(query, max_results=top_k))
+        return [f"• {r['title']}: {r['body'][:200]}" for r in results if r.get('body')]
+    except Exception:
+        return []
+
 def cascade_answer(query):
     task = classify_task(query)
     cascade = get_cascade(task)
@@ -446,6 +458,10 @@ def cascade_answer(query):
     if cmd_ctx:
         sys_content += f"\n\nRelevant command examples:\n{cmd_ctx}"
         print(f"  → {len(cmd_ctx.split(chr(10)))} command snippets injected", file=sys.stderr)
+    web_ctx = web_search(query)
+    if web_ctx:
+        sys_content += f"\n\nWeb search results:\n" + "\n".join(web_ctx)
+        print(f"  → {len(web_ctx)} web snippets injected", file=sys.stderr)
 
     messages = [
         {"role": "system", "content": sys_content},
@@ -469,12 +485,7 @@ def cascade_answer(query):
         t0 = time.time()
         if model_cfg.get("paid"):
             hit, info = compressed
-            if hit:
-                content, tok, _ = ask_paid(info, query)
-            else:
-                print(f"  [{short_name}] no RAG hit, skipping paid tier", file=sys.stderr)
-                prev_error = "No RAG compression available for paid tier"
-                continue
+            content, tok, _ = ask_paid(info if hit else None, query)
         else:
             content, tok, _ = ask(model_cfg, messages.copy(), prev_error)
         elapsed = time.time() - t0
@@ -493,7 +504,6 @@ def cascade_answer(query):
                 print(f"  → saved to {codes_path}", file=sys.stderr)
             fuche_ingest("code-fixes")
             print(f"  → ingested into RAG (code-fixes)", file=sys.stderr)
-            # write cascade status for UI - check actual Ollama loaded state
             import json
             loaded = get_loaded_ollama_models()
             status_models = [{"name": cfg["name"], "label": LABELS.get(key, key.capitalize()), "loaded": (cfg["name"].split(":")[0] in loaded)} for key, cfg in MODELS.items()]
@@ -505,12 +515,75 @@ def cascade_answer(query):
 
     total = time.time() - total_t0
     print(f"  All models failed — returning best attempt", file=sys.stderr)
-    # write cascade status for UI - check actual Ollama loaded state
     import json
     loaded = get_loaded_ollama_models()
     status_models = [{"name": cfg["name"], "label": LABELS.get(key, key.capitalize()), "loaded": (cfg["name"].split(":")[0] in loaded)} for key, cfg in MODELS.items()]
     json.dump(status_models, open("/tmp/.cascade-status", "w"))
     return content, short_name, chain, total
+
+
+def cascade_stream(query):
+    """Yield SSE events for each cascade phase."""
+    task = classify_task(query)
+    cascade = get_cascade(task)
+    yield json.dumps({"phase": "start", "task": task})
+
+    cmd_ctx = search_commands(query)
+    sys_content = "You are a coding assistant. Provide working code only."
+    if cmd_ctx:
+        sys_content += f"\n\nRelevant command examples:\n{cmd_ctx}"
+    web_ctx = web_search(query)
+    if web_ctx:
+        sys_content += f"\n\nWeb search results:\n" + "\n".join(web_ctx)
+
+    messages = [
+        {"role": "system", "content": sys_content},
+        {"role": "user", "content": query},
+    ]
+    prev_error = ""
+    chain = []
+    total_t0 = time.time()
+    content = ""
+    short_name = ""
+    compressed = compress_query(query) if DEEPSEEK_KEY else (False, None)
+
+    for model_cfg in cascade:
+        model_name = model_cfg["name"]
+        short_name = model_name.split("/")[-1].replace(":Q4_K_M", "").replace(":latest", "")
+        chain.append(short_name)
+        yield json.dumps({"phase": "trying", "model": short_name})
+
+        t0 = time.time()
+        if model_cfg.get("paid"):
+            hit, info = compressed
+            content, tok, _ = ask_paid(info if hit else None, query)
+        else:
+            content, tok, _ = ask(model_cfg, messages.copy(), prev_error)
+        elapsed = time.time() - t0
+
+        if content.startswith("Error:"):
+            prev_error = content
+            yield json.dumps({"phase": "error", "model": short_name, "error": content[:100]})
+            continue
+
+        passed, reason, _ = quality_gate(content, query, task)
+        if passed:
+            total = time.time() - total_t0
+            yield json.dumps({"phase": "gate_pass", "model": short_name, "chain": " → ".join(chain), "elapsed": f"{total:.1f}s"})
+            # stream output in chunks
+            chunk_size = 50
+            for i in range(0, len(content), chunk_size):
+                yield json.dumps({"phase": "token", "text": content[i:i+chunk_size]})
+            yield json.dumps({"phase": "done", "elapsed": f"{total:.1f}s"})
+            codes_path = append_codes_md(query, short_name, content, " → ".join(chain), total)
+            fuche_ingest("code-fixes")
+            return
+        else:
+            prev_error = f"Model output failed quality check: {reason}"
+            yield json.dumps({"phase": "gate_fail", "model": short_name, "reason": reason})
+
+    total = time.time() - total_t0
+    yield json.dumps({"phase": "all_failed", "elapsed": f"{total:.1f}s"})
 
 if __name__ == "__main__":
     q = " ".join(sys.argv[1:]).strip()

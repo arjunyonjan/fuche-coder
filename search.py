@@ -391,8 +391,24 @@ if __name__ == "__main__":
         sock_path = "/tmp/search-daemon.sock"
         if os.path.exists(sock_path):
             os.unlink(sock_path)
-        state = load_index("")  # pre-warm: load FAISS once
-        _get_model()  # pre-warm: load sentence-transformers model once
+        state = load_index("")
+        state_lock = threading.Lock()
+        _get_model()
+
+        def _reload_loop():
+            while True:
+                time.sleep(3600)
+                try:
+                    new_state = load_index("")
+                    with state_lock:
+                        state.clear()
+                        state.update(new_state)
+                    print(f"  [{time.strftime('%H:%M:%S')}] index reloaded ({len(state['emb_ids'])} vectors)", flush=True)
+                except Exception as e:
+                    print(f"  [{time.strftime('%H:%M:%S')}] reload failed: {e}", flush=True)
+
+        threading.Thread(target=_reload_loop, daemon=True).start()
+
         server = socket.socket(socket.AF_UNIX, socket.SOCK_STREAM)
         server.bind(sock_path)
         server.listen(5)
@@ -404,28 +420,36 @@ if __name__ == "__main__":
             for line in f:
                 try:
                     msg = json.loads(line.strip())
+                    if msg.get("cmd") == "ingest":
+                        root = msg.get("path", ".")
+                        coll = msg.get("collection", "")
+                        ingest_directory(root, coll)
+                        w.write(json.dumps({"status": "ok", "path": root}) + "\n")
+                        w.flush()
+                        continue
                     q = msg.get("query", "")
                     top_k = msg.get("top_k", 10)
                     coll = msg.get("collection", "")
                     ft = msg.get("file_type", "")
-                    local_state = load_index(coll) if coll else state
+                    with state_lock:
+                        current_state = state if not coll else load_index(coll)
                     results = []
                     qv = embed(q)[0]
-                    fetch_k = min(top_k * 3 + 20, len(local_state["emb_ids"]))
-                    if local_state["index"] is not None:
-                        scores, indices = local_state["index"].search(qv.reshape(1, -1), fetch_k)
+                    fetch_k = min(top_k * 3 + 20, len(current_state["emb_ids"]))
+                    if current_state["index"] is not None:
+                        scores, indices = current_state["index"].search(qv.reshape(1, -1), fetch_k)
                         scores, indices = scores[0], indices[0]
                     else:
-                        embs = np.load(local_state["emb_path"])
+                        embs = np.load(current_state["emb_path"])
                         scores = qv @ embs.T
                         indices = np.argsort(scores)[::-1][:fetch_k]
                         scores = scores[indices]
                     for i, idx in enumerate(indices):
-                        if idx < 0 or idx >= len(local_state["emb_ids"]):
+                        if idx < 0 or idx >= len(current_state["emb_ids"]):
                             continue
-                        h = local_state["emb_ids"][idx]
-                        src = local_state["src_map"].get(h, "?")
-                        snip = local_state["snip_map"].get(h, "")
+                        h = current_state["emb_ids"][idx]
+                        src = current_state["src_map"].get(h, "?")
+                        snip = current_state["snip_map"].get(h, "")
                         if ft and not src.endswith(ft):
                             continue
                         kw = _keyword_score(q, snip)
